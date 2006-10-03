@@ -1,0 +1,10 @@
+
+foo = bar
+
+[template]
+
+short  = _short.tt
+long   = _long.tt
+modif  = _modif.tt
+msg    = _msg.tt
+home   = _home.tt

@@ -1,0 +1,876 @@
+Cannot find page `File::Tabular' at L<> on line 783
+Cannot find page `Search::QueryParser' at L<> on line 784
+Cannot find page `File::Tabular::Web::Attachments' at L<> on line 802
+Cannot find page `Search::Indexer' at L<> on line 804
+Cannot find page `File::Tabular' at L<> on line 850
+Cannot find node `search_key' at L<> on line 936
+Cannot find node `empty_record' at L<> on line 936
+Cannot find node `post_search' at L<> on line 953
+Cannot find page `Search::QueryParser' at L<> on line 993
+Cannot find page `File::Tabular' at L<> on line 993
+Cannot find page `Template' at L<> on line 1087
+Cannot find page `AppConfig' at L<> on line 1177
+Cannot find page `File::Tabular' at L<> on line 1199
+Cannot find page `Appconfig' at L<> on line 1206
+Cannot find page `Appconfig::File' at L<> on line 1211
+Cannot find page `File::Tabular' at L<> on line 1259
+Cannot find page `POSIX' at L<> on line 1337
+Cannot find page `Template::Filters' at L<> on line 1429
+Cannot find page `Apache::Reload' at L<> on line 1438
+Cannot find page `CGI' at L<> on line 1477
+Writing HTML html/Web.html
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+<html>
+<head>
+<meta content="text/html; charset=ISO-8859-1" http-equiv="Content-Type">
+<meta content="text/css" http-equiv="Content-Style-Type">
+<meta content="Marek::Pod::HTML 0.49" name="GENERATOR">
+<link href="C:/perl/html/podmaster.css" rel="stylesheet" type="text/css">
+<title>Web</title>
+</head>
+<body>
+<a class="POD_NAVLINK" name="Pod_TOP_OF_PAGE"></a>
+<table width="100%">
+<tr><td align="left" width="1%"><a class="POD_NAVLINK" href="podindex.html">Next:<br>podindex</a></td><td align="left" width="1%"><a class="POD_NAVLINK" href="podtoc.html">Previous:<br>podtoc</a></td><td width="90%">&nbsp;</td><td align="right" width="1%"><a class="POD_NAVLILNK" href="podtoc.html">[Table&nbsp;of&nbsp;Contents]</a></td><td align="right" width="1%"><a class="POD_NAVLINK" href="podindex.html">[Index]</a></td></tr>
+</table>
+<h1 class="POD_TITLE">Web</h1>
+<hr>
+<ul>
+<li><a class="POD_NAVLINK" href="#NAME">NAME</a>
+<li><a class="POD_NAVLINK" href="#INTRODUCTION">INTRODUCTION</a>
+<li><a class="POD_NAVLINK" href="#QUICKSTART">QUICKSTART</a>
+<ul>
+<li><a class="POD_NAVLINK" href="#Setting_up_the_frame">Setting up the framework</a>
+<li><a class="POD_NAVLINK" href="#Setting_up_a_particu">Setting up a particular application</a>
+</ul>
+<li><a class="POD_NAVLINK" href="#WEB_API">WEB API</a>
+<ul>
+<li><a class="POD_NAVLINK" href="#Phases_of_a_request">Phases of a request</a>
+<li><a class="POD_NAVLINK" href="#Core_parameters">Core parameters</a>
+<ul>
+<li><a class="POD_NAVLINK" href="#PRE">PRE</a>
+<li><a class="POD_NAVLINK" href="#PC">PC</a>
+<li><a class="POD_NAVLINK" href="#SS">SS</a>
+<li><a class="POD_NAVLINK" href="#OP">OP</a>
+<li><a class="POD_NAVLINK" href="#V">V</a>
+</ul>
+<li><a class="POD_NAVLINK" href="#Aliases">Aliases</a>
+<ul>
+<li><a class="POD_NAVLINK" href="#H">H</a>
+<li><a class="POD_NAVLINK" href="#S">S</a>
+<li><a class="POD_NAVLINK" href="#L">L</a>
+<li><a class="POD_NAVLINK" href="#M">M</a>
+<li><a class="POD_NAVLINK" href="#U">U</a>
+<li><a class="POD_NAVLINK" href="#A">A</a>
+<li><a class="POD_NAVLINK" href="#D">D</a>
+<li><a class="POD_NAVLINK" href="#X">X</a>
+</ul>
+<li><a class="POD_NAVLINK" href="#Other_URL_possibilit">Other URL possibilities</a>
+</ul>
+<li><a class="POD_NAVLINK" href="#WRITING_TEMPLATES">WRITING TEMPLATES</a>
+<li><a class="POD_NAVLINK" href="#PUBLIC_METHODS">PUBLIC METHODS</a>
+<ul>
+<li><a class="POD_NAVLINK" href="#process"><code>process</code></a>
+</ul>
+<li><a class="POD_NAVLINK" href="#PRIVATE_METHODS">PRIVATE METHODS</a>
+<ul>
+<li><a class="POD_NAVLINK" href="#new"><code>new</code></a>
+<li><a class="POD_NAVLINK" href="#initialize_request"><code>initialize_request</code></a>
+<li><a class="POD_NAVLINK" href="#new_app"><code>new_app</code></a>
+<li><a class="POD_NAVLINK" href="#read_config"><code>read_config</code></a>
+<li><a class="POD_NAVLINK" href="#find_operation"><code>find_operation</code></a>
+<li><a class="POD_NAVLINK" href="#dispatch_request"><code>dispatch_request</code></a>
+<li><a class="POD_NAVLINK" href="#expand_aliases"><code>expand_aliases</code></a>
+<li><a class="POD_NAVLINK" href="#open_data"><code>open_data</code></a>
+</ul>
+<li><a class="POD_NAVLINK" href="#CONFIGURATION_FILE">CONFIGURATION FILE</a>
+<ul>
+<li><a class="POD_NAVLINK" href="#Global_section">Global section</a>
+<li><a class="POD_NAVLINK" href="#_fixed_default_">[fixed] / [default]</a>
+<li><a class="POD_NAVLINK" href="#_permissions_">[permissions]</a>
+<li><a class="POD_NAVLINK" href="#_fields_">[fields]</a>
+<li><a class="POD_NAVLINK" href="#_template_">[template]</a>
+<li><a class="POD_NAVLINK" href="#_handlers_">[handlers]</a>
+<li><a class="POD_NAVLINK" href="#_filters_">[filters]</a>
+<li><a class="POD_NAVLINK" href="#_perl_">[perl]</a>
+</ul>
+<li><a class="POD_NAVLINK" href="#PUBLIC_METHODS1">PUBLIC METHODS</a>
+<li><a class="POD_NAVLINK" href="#PRIVATE_METHODS1">PRIVATE METHODS</a>
+<li><a class="POD_NAVLINK" href="#TODO">TODO</a>
+</ul>
+<hr>
+<p></p>
+<h2 class="POD_HEAD1"><a name="NAME">NAME</a></h2>
+<p class="POD_TEXT">
+File::Tabular::Web - turn a tabular file into a web application
+</p>
+<h2 class="POD_HEAD1"><a name="INTRODUCTION">INTRODUCTION</a></h2>
+<p class="POD_TEXT">
+This is an Apache web application framework based on
+<u>File::Tabular</u> and
+<u>Search::QueryParser</u>.  It offers builtin
+services for searching, displaying and updating a flat tabular
+datafile.  It may run either under mod_perl Registry or under plain
+old cgi-bin.
+</p>
+<p class="POD_TEXT">
+Setting up the framework just requires two directives within the
+Apache configuration.  Once this is done, all the webmaster has to do
+in order to build a new application is to supply the data (a tabular
+.txt file) and run the helper script <code>ftw_new_app.pl</code>, which
+automatically builds configuration and template files for that
+application.  These files can then be edited for specific adaptations.
+No single line of Perl is needed, and the new URL becomes immediately
+active, without webserver configuration nor restart.
+</p>
+<p class="POD_TEXT">
+For more advanced uses, application-specific Perl handlers can be
+hooked up into the framework for performing particular tasks.
+Furthermore, subclassing can be used for extending the builtin 
+services. In particular, see the companion
+<u>File::Tabular::Web::Attachments</u>
+module, which provides services for attaching documents
+and indexing them through  <u>Search::Indexer</u>,
+therefore providing a mini-framework for storing electronic documents.
+</p>
+<p></p>
+<h2 class="POD_HEAD1"><a name="QUICKSTART">QUICKSTART</a></h2>
+<h3 class="POD_HEAD2"><a name="Setting_up_the_frame">Setting up the framework</a></h3>
+<p class="POD_TEXT">
+Install the <code>File::Tabular::Web</code> module in your local Perl site.
+</p>
+<p class="POD_TEXT">
+In your apache/cgi-bin (or apache/perl if running under mod_perl Registry) :
+create a file named &quot;ftw&quot; containing
+</p>
+<pre class="POD_VERBATIM">
+   use File::Tabular::Web;
+   File::Tabular::Web-&gt;process;
+</pre>
+<p class="POD_TEXT">
+In your Apache configuration (httpd.conf), add directives :
+</p>
+<pre class="POD_VERBATIM">
+  Action file-tabular-web /cgi-bin/ftw # (or /perl/ftw)
+  AddHandler file-tabular-web .ftw
+</pre>
+<p class="POD_TEXT">
+and restart the server.
+</p>
+<p class="POD_TEXT">
+Now any file ending with &quot;.ftw&quot; in your htdocs tree will be treated as
+a File::Tabular::Web application. The handler will be called automatically
+and will read configuration instructions in the &quot;.ftw&quot; file.
+Therefore new applications can be installed without any further
+changes in the Apache configuration.
+</p>
+<p class="POD_TEXT">
+Of course you can choose whatever name you like instead of &quot;ftw&quot; for file 
+suffixes and for the two-lines script; &quot;ftw&quot; was suggested because it 
+does not conflict with other common suffixes. 
+Similarly, the <code>file-tabular-web</code> handler name can be arbitrarily changed.
+</p>
+<p></p>
+<h3 class="POD_HEAD2"><a name="Setting_up_a_particu">Setting up a particular application</a></h3>
+<p class="POD_TEXT">
+We'll take for example a simple people directory application.
+First create directory <code>apache/htdocs/people</code>.
+</p>
+<p class="POD_TEXT">
+Export your list of people in a flat text file named
+<code>apache/htdocs/people/dir.txt</code>.
+If you export from an Excel Spreadsheet, do NOT export as CSV format ; 
+choose &quot;text (tab-separated)&quot; instead. The datafile should contain
+one line per record, with a character like '|' or TAB as field 
+separator, and field names on the first line 
+(see <u>File::Tabular</u> for details).
+</p>
+<p class="POD_TEXT">
+Run the helper script
+</p>
+<pre class="POD_VERBATIM">
+  perl ftw_new_app.pl --fieldSep \\t apache/htdocs/people/dir.txt
+</pre>
+<p class="POD_TEXT">
+This will create in the same directory a configuration file <code>dir.ftw</code>,
+and a collection of HTML templates <code>dir_short.tt</code>, <code>dir_long.tt</code>,
+<code>dir_modif.tt</code>, etc. The <code>--fieldSep</code> option specifies which
+character acts as field separator (the default is '|');
+other option are available, see
+</p>
+<pre class="POD_VERBATIM">
+  perl ftw_new_app.pl --help
+</pre>
+<p class="POD_TEXT">
+for a list.
+</p>
+<p class="POD_TEXT">
+The URL <code>http:://your.web.server/people/dir.ftw</code>
+is now available to access the application.
+You may first test the default layout, and then customize
+the templates to suit your needs.
+</p>
+<p class="POD_TEXT">
+Note : initially all files are placed in the same directory, because
+it is simple and convenient; however, data and templates files
+are not really web resources and therefore should not theoretically
+belong to the htdocs tree. If you want a more structured architecture,
+you may move these files to a different location, and specify
+within the configuration how to find them (see instructions below).
+</p>
+<p></p>
+<h2 class="POD_HEAD1"><a name="WEB_API">WEB API</a></h2>
+<h3 class="POD_HEAD2"><a name="Phases_of_a_request">Phases of a request</a></h3>
+<p class="POD_TEXT">
+Each request to this web application framework goes through the following
+phases :
+</p>
+<dl class="POD_LIST">
+<dt class="POD_ITEM"><a name="initialisation_phase"><b>initialisation phase</b></a>
+<dd>
+this is where the configuration file is read
+<dt class="POD_ITEM"><a name="alias_expansion"><b>alias expansion</b></a>
+<dd>
+CGI parameters are inspected and alias-expanded into
+specific handlers for the following phases
+<dt class="POD_ITEM"><a name="data_connection"><b>data connection</b></a>
+<dd>
+opening the data file
+<dt class="POD_ITEM"><a name="data_preparation_pha"><b>data preparation phase</b></a>
+<dd>
+building a result set, either from searching existing records,
+or by building a new record. A first check of user access
+rights may happen during this phase.
+<dt class="POD_ITEM"><a name="post_check_phase"><b>post-check phase</b></a>
+<dd>
+checking if the user has proper access rights to perform the
+desired operation on the result set (this may involve inspecting
+each record).
+<dt class="POD_ITEM"><a name="data_manipulation_ph"><b>data manipulation phase</b></a>
+<dd>
+operations on the result set : deletions, updates, or just
+sorting and slicing the results after a search.
+<dt class="POD_ITEM"><a name="display_phase"><b>display phase</b></a>
+<dd>
+presenting the results, most commonly through an HTML template
+in TT2 format.
+</dl>
+<p></p>
+<p class="POD_TEXT">
+Parameters to the Web request determine what will be performed
+a each of these phases. <i>Core parameters</i> directly program 
+those phases; <i>aliases</i> offer a shorter API where each
+alias is translated into a collection of core parameters.
+</p>
+<h3 class="POD_HEAD2"><a name="Core_parameters">Core parameters</a></h3>
+<h4 class="POD_HEAD3"><a name="PRE">PRE</a></h4>
+<p class="POD_TEXT">
+This specifies how to perform the data preparation phase. Usually this is
+mapped to methods <a class="POD_LINK" href="#search">search</a>, <u>search_key</u> or <u>empty_record</u>; but
+it is also possible to specifiy user-defined methods.
+</p>
+<h4 class="POD_HEAD3"><a name="PC">PC</a></h4>
+<p class="POD_TEXT">
+This specifies how to perform the post-check phase (calling
+<code>$self-&gt;can_do($self-&gt;param('PC'))</code> do decide
+whether or not the connected user has a right to do this operation).
+</p>
+<h4 class="POD_HEAD3"><a name="SS">SS</a></h4>
+<p class="POD_TEXT">
+Contains the search string.
+</p>
+<h4 class="POD_HEAD3"><a name="OP">OP</a></h4>
+<p class="POD_TEXT">
+This specifies which operation will be performed
+during  data manipulation phase. Builtin operations
+are <u>post_search</u>, <a class="POD_LINK" href="#delete">delete</a> and <a class="POD_LINK" href="#update_before_sub_my">update</a>.
+Of course it is also possible to specifiy user-defined methods.
+</p>
+<p></p>
+<h4 class="POD_HEAD3"><a name="V">V</a></h4>
+<p class="POD_TEXT">
+Name of the view (i.e. template) that will be used to display
+the results.
+</p>
+<p></p>
+<h3 class="POD_HEAD2"><a name="Aliases">Aliases</a></h3>
+<h4 class="POD_HEAD3"><a name="H">H</a></h4>
+<pre class="POD_VERBATIM">
+  http://myServer/some/app.ftw?H
+</pre>
+<p class="POD_TEXT">
+Displays the homepage of the application (through template <code>home.tt</code>).
+Equivalent to
+</p>
+<pre class="POD_VERBATIM">
+  http://myServer/some/app.ftw?V=home
+</pre>
+<h4 class="POD_HEAD3"><a name="S">S</a></h4>
+<pre class="POD_VERBATIM">
+  http://myServer/some/app.ftw?S=&lt;criteria&gt;
+</pre>
+<p class="POD_TEXT">
+Searches records matching the specified criteria, and displays them 
+through the <code>short.tt</code> template. Here are some example of search criteria :
+</p>
+<pre class="POD_VERBATIM">
+  word1 word2 word3                 # records containing these 3 words anywhere
+  +word1 +word2 +word3              # idem
+  word1 word2 -word3                # containing word1 and word2 but not word3
+  word1 AND (word2 OR word3)        # obvious
+  &quot;word1 word2 word3&quot;               # sequence
+  word*                             # word completion
+  field1:word1 field2:word2         # restricted by field
+  field1 == val1  field2 &gt; val2     # relational operators (will inspect the
+                                    #   shape of supplied values to decide
+                                    #   about string/numeric/date comparisons)
+  field~regex                       # regex
+</pre>
+<p class="POD_TEXT">
+See <u>Search::QueryParser</u> and <u>File::Tabular</u> for 
+more details.
+</p>
+<p class="POD_TEXT">
+Equivalent to
+</p>
+<pre class="POD_VERBATIM">
+  http://myServer/some/app.ftw?PRE=search&amp;SS=&lt;criteria&gt;&amp;OP=post_search&amp;V=short
+</pre>
+<p></p>
+<h4 class="POD_HEAD3"><a name="L">L</a></h4>
+<pre class="POD_VERBATIM">
+  http://myServer/some/app.ftw?L=&lt;key&gt;
+</pre>
+<p class="POD_TEXT">
+Finds the record with the given key and displays it through the
+<code>long.tt</code> template.
+</p>
+<p class="POD_TEXT">
+Equivalent to
+</p>
+<pre class="POD_VERBATIM">
+  http://myServer/some/app.ftw?PRE=search_key&amp;SS=&lt;key&gt;&amp;V=long
+</pre>
+<p></p>
+<h4 class="POD_HEAD3"><a name="M">M</a></h4>
+<pre class="POD_VERBATIM">
+  http://myServer/some/app.ftw?M=key
+</pre>
+<p class="POD_TEXT">
+Finds the record with the given key and displays it through the
+<code>modif.tt</code> template (typically this will be a form
+with an action to call the update URL (<code>?U=key</code>).
+</p>
+<p class="POD_TEXT">
+Equivalent to
+</p>
+<pre class="POD_VERBATIM">
+  http://myServer/some/app.ftw?PRE=search_key&amp;SS=&lt;key&gt;&amp;V=modif
+</pre>
+<p></p>
+<h4 class="POD_HEAD3"><a name="U">U</a></h4>
+<pre class="POD_VERBATIM">
+  http://myServer/some/app.ftw?U=&lt;key&gt;&amp;field1=val1&amp;field2=val2&amp;...
+</pre>
+<p class="POD_TEXT">
+Finds the record with the given key
+and updates it with given field names and values.
+Of course these can be (and even should be) passed through
+POST method instead of GET.
+After update, displays an update message through the <code>msg.tt</code> template.
+</p>
+<p class="POD_TEXT">
+Equivalent to
+</p>
+<pre class="POD_VERBATIM">
+  http://myServer/some/app.ftw?PRE=search_key&amp;SS=&lt;key&gt;&amp;OP=update
+</pre>
+<p></p>
+<h4 class="POD_HEAD3"><a name="A">A</a></h4>
+<pre class="POD_VERBATIM">
+  http://myServer/some/app.ftw?A
+</pre>
+<p class="POD_TEXT">
+Displays a form for creating a new record, through the 
+<code>modif.tt</code> template. Fields may be filled by default values
+given in the configuration file.
+</p>
+<p class="POD_TEXT">
+Equivalent to
+</p>
+<pre class="POD_VERBATIM">
+  http://myServer/some/app.ftw?PRE=empty_record&amp;PC=add&amp;V=modif
+</pre>
+<p></p>
+<h4 class="POD_HEAD3"><a name="D">D</a></h4>
+<pre class="POD_VERBATIM">
+  http://myServer/some/app.ftw?D=&lt;key&gt;
+</pre>
+<p class="POD_TEXT">
+Deletes record with the given key.
+After deletion, displays an update message through the <code>msg.tt</code> template.
+</p>
+<p class="POD_TEXT">
+Equivalent to
+</p>
+<pre class="POD_VERBATIM">
+  http://myServer/some/app.ftw?PRE=search_key&amp;SS=&lt;key&gt;&amp;OP=delete
+</pre>
+<h4 class="POD_HEAD3"><a name="X">X</a></h4>
+<pre class="POD_VERBATIM">
+  http://myServer/some/app.ftw?X
+</pre>
+<p class="POD_TEXT">
+Display all records throught the <code>download.tt</code> template.
+</p>
+<p class="POD_TEXT">
+Equivalent to
+</p>
+<pre class="POD_VERBATIM">
+  http://myServer/some/app.ftw?V=download
+</pre>
+<h3 class="POD_HEAD2"><a name="Other_URL_possibilit">Other URL possibilities</a></h3>
+<pre class="POD_VERBATIM">
+  http://myServer/some/app.ftw?PRE=search&amp;SS=&lt;criteria&gt;&amp;OP=delete
+
+  http://myServer/some/app.ftw?PRE=search&amp;SS=&lt;criteria&gt;&amp;&lt;field&gt;=&lt;val&gt;&amp;OP=update
+</pre>
+<p></p>
+<p></p>
+<p></p>
+<h2 class="POD_HEAD1"><a name="WRITING_TEMPLATES">WRITING TEMPLATES</a></h2>
+<p class="POD_TEXT">
+This section assumes that you already know how to write
+templates for the Template Toolkit (see <u>Template</u>).
+</p>
+<p class="POD_TEXT">
+The path for searching templates includes the application directory
+(where the configuration file resides) and the directory
+specified within the configuration file by parameters
+<code>[fixed]tmpl_dir</code> or <code>[default]tmpl_dir</code>, or, by
+default, <code>Apache/lib/tmpl/tdb</code>.
+</p>
+<p class="POD_TEXT">
+Values passed to templates are as follows :
+</p>
+<dl class="POD_LIST">
+<dt class="POD_ITEM"><a name="self"><code>self</code></a>
+<dd>
+handle to the <code>File::Tabular::Web</code> object; from there you can access
+<code>self.cfg</code> (configuration information), <code>self.cgi</code> (CGI request object)
+and <code>self.msg</code> (last message).
+<p></p>
+<dt class="POD_ITEM"><a name="found"><code>found</code></a>
+<dd>
+structure containing the results. Fields within this structure are :
+<dl class="POD_LIST">
+<dt class="POD_ITEM"><a name="count"><code>count</code></a>
+<dd>
+how many records were retrieved
+<dt class="POD_ITEM"><a name="records"><code>records</code></a>
+<dd>
+arrayref containing a slice of records
+<dt class="POD_ITEM"><a name="start"><code>start</code></a>
+<dd>
+index of first record in the returned slice
+<dt class="POD_ITEM"><a name="end"><code>end</code></a>
+<dd>
+index of last record in the returned slice
+<dt class="POD_ITEM"><a name="next_link"><code>next_link</code></a>
+<dd>
+href link to the next slice of results (if any)
+<dt class="POD_ITEM"><a name="prev_link"><code>prev_link</code></a>
+<dd>
+href link to the previous slice of results (if any)
+</dl>
+<p></p>
+<p></p>
+</dl>
+<p></p>
+<p></p>
+<p></p>
+<h2 class="POD_HEAD1"><a name="PUBLIC_METHODS">PUBLIC METHODS</a></h2>
+<h3 class="POD_HEAD2"><a name="process"><code>process</code></a></h3>
+<pre class="POD_VERBATIM">
+  File::Tabular::Web-&gt;process;
+</pre>
+<p class="POD_TEXT">
+This is the main entry point into the module. It creates a new request
+object, initializes it from information passed through the URL and
+through CGI parameters, and processes the request. In case of error,
+and HTML error page is generated.
+</p>
+<h2 class="POD_HEAD1"><a name="PRIVATE_METHODS">PRIVATE METHODS</a></h2>
+<h3 class="POD_HEAD2"><a name="new"><code>new</code></a></h3>
+<p class="POD_TEXT">
+Creates a new <code>File::Tabular::Web</code> object, which represents a web
+request. Reads PATH_INFO and CGI parameters, 
+and loads the configuration directives for that web application.
+</p>
+<h3 class="POD_HEAD2"><a name="initialize_request"><code>initialize_request</code></a></h3>
+<p class="POD_TEXT">
+Set up some general properties for the request, from information
+collected from configuration directives.
+</p>
+<p></p>
+<h3 class="POD_HEAD2"><a name="new_app"><code>new_app</code></a></h3>
+<p class="POD_TEXT">
+Creates a Perl structure representing a ftw web application,
+after having read the configuration directives.
+</p>
+<h3 class="POD_HEAD2"><a name="read_config"><code>read_config</code></a></h3>
+<p class="POD_TEXT">
+Set up <u>AppConfig</u> and read the configuration file.
+</p>
+<h3 class="POD_HEAD2"><a name="find_operation"><code>find_operation</code></a></h3>
+<p class="POD_TEXT">
+Requests are mapped to sequences of &quot;operations&quot;. An operation 
+corresponds either to an internal method, or to a loaded function.
+So <code>find_operation</code> finds out which.
+</p>
+<h3 class="POD_HEAD2"><a name="dispatch_request"><code>dispatch_request</code></a></h3>
+<p class="POD_TEXT">
+Decides which sequence of operations should be called, and call them.
+</p>
+<h3 class="POD_HEAD2"><a name="expand_aliases"><code>expand_aliases</code></a></h3>
+<p class="POD_TEXT">
+An &quot;alias&quot; is a single-letter CGI argument that acts as a shortcut
+for a sequence of operations. This method inspects CGI arguments
+and expands the first alias found.
+</p>
+<h3 class="POD_HEAD2"><a name="open_data"><code>open_data</code></a></h3>
+<p class="POD_TEXT">
+Retrieves the name of the datafile, decides whether it
+should be opened for readonly or for update, and 
+creates a corresponding <u>File::Tabular</u> object. 
+The datafile may be cached in memory if directive <code>useFileCache</code> is
+activated.
+</p>
+<p></p>
+<h2 class="POD_HEAD1"><a name="CONFIGURATION_FILE">CONFIGURATION FILE</a></h2>
+<p class="POD_TEXT">
+The configuration file will be parsed by <u>Appconfig</u>.
+This file format supports comments (starting with <code>#</code>), 
+continuation lines (through final <code>\</code>), &quot;heredoc&quot; quoting
+style for multiline values, and section headers similar
+to a Windows INI file. All details about the configuration
+file format can be found in <u>Appconfig::File</u>.
+</p>
+<p class="POD_TEXT">
+Below is the list of the various recognized sections and parameters.
+</p>
+<h3 class="POD_HEAD2"><a name="Global_section">Global section</a></h3>
+<p class="POD_TEXT">
+The global section (without any section header) can contain
+general-purpose parameters that can be retrieved later from 
+the viewing templates through <code>[% self.cfg.&lt;param&gt; %]</code>;
+this is useful for example for setting a title or other
+values that will be common to all templates.
+</p>
+<dl class="POD_LIST">
+<dt class="POD_ITEM"><a name="useFileCache">useFileCache</a>
+<dd>
+If true, the whole datafile will be slurped into memory and reused
+across requests.
+<p></p>
+<p></p>
+</dl>
+<h3 class="POD_HEAD2"><a name="_fixed_default_">[fixed] / [default]</a></h3>
+<p class="POD_TEXT">
+The <b>fixed</b> and <b>default</b> sections contain some parameters
+that control the behaviour of the application ; it is your choice
+to either put them in the <b>fixed</b> section (values will never change)
+or to put them in the <b>default</b> section (default values can be 
+overriden by CGI parameters).
+</p>
+<p class="POD_TEXT">
+The parameters are :
+</p>
+<dl class="POD_LIST">
+<dt class="POD_ITEM"><a name="max"><code>max</code></a>
+<dd>
+Maximum number of records handled in searches (records above that number
+will be dropped).
+<dt class="POD_ITEM"><a name="count1"><code>count</code></a>
+<dd>
+Size of a result slice (number of records displayed at a time
+when presenting results of a search).
+<dt class="POD_ITEM"><a name="sortBy"><code>sortBy</code></a>
+<dd>
+Sort criteria, like for example <code>someField: -num, otherField: alpha</code>.
+See <u>search</u> in <u>File::Tabular</u> for the exact syntax of 
+sort specifications.
+<p></p>
+</dl>
+<p></p>
+<h3 class="POD_HEAD2"><a name="_permissions_">[permissions]</a></h3>
+<p class="POD_TEXT">
+The <b>permissions</b> section specifies access control rights for the
+applications. For each entry listed below, you can give a list of users
+[or groups], separated by commas or spaces : these are the &quot;permanent&quot;
+rights, valid for all data records. In addition, rights can be granted
+on a per-record basis : writing <code>$fieldname</code> (starting
+with a literal dollar sign) means that 
+users can access records in which the content of  <code>fieldname</code>
+matches their username.
+</p>
+<p class="POD_TEXT">
+Here are the possible entries for positive rights :
+</p>
+<dl class="POD_LIST">
+<dt class="POD_ITEM"><a name="add"><code>add</code></a>
+<dd>
+Right to add new records.
+<dt class="POD_ITEM"><a name="delete"><code>delete</code></a>
+<dd>
+Right to delete records.
+<dt class="POD_ITEM"><a name="modif"><code>modif</code></a>
+<dd>
+Right to modify records.
+<dt class="POD_ITEM"><a name="search"><code>search</code></a>
+<dd>
+Right to search records.
+</dl>
+<p class="POD_TEXT">
+Each of the entries above also has a corresponding entry for negative
+rights, written <code>no_add</code>, <code>no_delete</code>, etc.; so that you can
+selectively prevent some users to perform specific actions.
+</p>
+<p></p>
+<h3 class="POD_HEAD2"><a name="_fields_">[fields]</a></h3>
+<dl class="POD_LIST">
+<dt class="POD_ITEM"><a name="indexedDocNum_field_"><code>indexedDocNum &lt;field&gt;</code></a>
+<dd>
+Name of the field which holds the <i>document Number</i>.
+<dt class="POD_ITEM"><a name="indexedDocContent_su"><code>indexedDocContent = sub {my ($self, $record) = @_; ...; return $buf;}</code></a>
+<dd>
+Handler to get the textual content from an attached indexed document.
+The handler should return a buffer with the textual representation of 
+the document content.
+<dt class="POD_ITEM"><a name="indexedDocFile_field"><code>indexedDocFile &lt;field&gt;</code></a>
+<dd>
+Name of the field which holds the <i>document filename</i>.
+<dt class="POD_ITEM"><a name="upload_field_"><code>upload &lt;field&gt;</code></a>
+<dd>
+Just declares <code>field</code> to be an upload field.
+<dt class="POD_ITEM"><a name="upload_field_sub_my_"><code>upload &lt;field&gt; = sub {my ($self, $record, $upldClientName) = @_; ...; return $newname;}</code></a>
+<dd>
+Declares <code>field</code> to be an upload field, and supplies a hook to choose
+the server-side name of the uploaded file. The supplied <code>sub</code> should 
+return a pathname.
+<dt class="POD_ITEM"><a name="time_field_format_"><code>time &lt;field&gt; = &lt;format&gt;</code></a>
+<dd>
+Declares <code>field</code> to be a <i>time field</i>, which means that whenever
+a record is updated, the current local time will be automatically
+inserted in that field. The <i>format</i> argument will be
+passed to <u>POSIX strftime()</u>. Ex :
+<pre class="POD_VERBATIM">
+  time DateModif = %d.%m.%Y    
+  time TimeModif = %H:%M:%S
+</pre>
+<dt class="POD_ITEM"><a name="user_field_"><code>user = &lt;field&gt;</code></a>
+<dd>
+Declares <code>field</code> to be a <i>user field</i>, which means that whenever
+a record is updated, the current username will be automatically
+inserted in that field.
+<dt class="POD_ITEM"><a name="autonum_field_"><code>autonum &lt;field&gt;</code></a>
+<dd>
+Activates autonumbering for new records ; the number will be
+stored in the given field.
+<dt class="POD_ITEM"><a name="default_field_value_"><code>default &lt;field&gt; = &lt;value&gt;</code></a>
+<dd>
+Default values for some fields ; will be inserted into new records.
+</dl>
+<h3 class="POD_HEAD2"><a name="_template_">[template]</a></h3>
+<p class="POD_TEXT">
+This section specifies where to find templates for various views.
+The specified locations will be looked for either in the
+current directory, or in <code>&lt;apache_dir&gt;/lib/tmpl/app</code>.
+</p>
+<dl class="POD_LIST">
+<dt class="POD_ITEM"><a name="short">short</a>
+<dd>
+Template for the &quot;short&quot; display of records (typically 
+a table for presenting search results).
+<dt class="POD_ITEM"><a name="long">long</a>
+<dd>
+Template for the &quot;long&quot; display of records (typically 
+for a detailed presentation of a single record ).
+<dt class="POD_ITEM"><a name="modif1">modif</a>
+<dd>
+Template for editing a record (typically this will be a form
+with an action to call the update URL (<code>?U=key</code>).
+<dt class="POD_ITEM"><a name="msg">msg</a>
+<dd>
+Template for presenting special messages to the user 
+(messages after a record update or deletion, or error messages).
+<dt class="POD_ITEM"><a name="home">home</a>
+<dd>
+Homepage for the application.
+</dl>
+<p></p>
+<p></p>
+<h3 class="POD_HEAD2"><a name="_handlers_">[handlers]</a></h3>
+<p class="POD_TEXT">
+In this section, you can insert your own code for various phases
+of the request cycle. This code will be <b>eval</b>'d and can
+then be called in the URLs.
+</p>
+<dl class="POD_LIST">
+<dt class="POD_ITEM"><a name="prepare_handlerName_"><code>prepare &lt;handlerName&gt; = sub {my $self=shift; ...}</code></a>
+<dd>
+Registers a handler for the <i>data preparation</i> phase.
+The handler can then be called by passing
+a <b>PRE</b> parameter with value <b>handlerName</b>.
+<p></p>
+<dt class="POD_ITEM"><a name="update_before_sub_my"><code>update before = sub {my $self=shift; my $r=shift; ...}</code></a>
+<dd>
+Registers a handler that will be called automatically
+before updating a record. The record is passed as second argument.
+<p></p>
+</dl>
+<h3 class="POD_HEAD2"><a name="_filters_">[filters]</a></h3>
+<p></p>
+<p class="POD_TEXT">
+Specifies filters for the Template Toolkit.
+Each filter takes the form
+</p>
+<pre class="POD_VERBATIM">
+  filter_name = function_name, dynamic_flag
+</pre>
+<p class="POD_TEXT">
+where <code>filter_name</code> is the name seen within templates, 
+<code>function_name</code> is the Perl function implementing the filter,
+and <code>dynamic_flag</code> is either 0 or 1 depending on whether the filter
+is static or dynamic (see <u>Template::Filters</u>).
+</p>
+<h3 class="POD_HEAD2"><a name="_perl_">[perl]</a></h3>
+<p class="POD_TEXT">
+The <code>perl</code> provides several ways to dynamically load code into the
+current interpreter. If running under mod_perl, be sure to know what
+you are doing, since the loaded code might interfere with code already
+loaded into the server. Also beware that packages or functions loaded
+in this way will not be recognized properly by 
+<u>Apache::Reload</u>, so you will need to fully restart 
+Apache in case of any change in the code.
+</p>
+<dl class="POD_LIST">
+<dt class="POD_ITEM"><a name="class_My_File_Tabula"><code>class My::File::Tabular::Web::Subclass</code></a>
+<dd>
+Will dynamically load the specified module and use it as 
+class for the current <code>app</code> object.
+<p></p>
+<dt class="POD_ITEM"><a name="use_Some_Module_qw_i"><code>use Some::Module qw/import list/</code></a>
+<dd>
+Will dynamically load the specified module. An import list may
+be specified, i.e. <code>use Some::Module qw/foo :bar/</code>.
+<p></p>
+<dt class="POD_ITEM"><a name="require_some_file_pl"><code>require some/file.pl</code></a>
+<dd><p></p>
+<dt class="POD_ITEM"><a name="eval_some_code_"><code>eval &quot;some code&quot;</code></a>
+<dd><p></p>
+</dl>
+<p></p>
+<p></p>
+<p></p>
+<h2 class="POD_HEAD1"><a name="PUBLIC_METHODS1">PUBLIC METHODS</a></h2>
+<p></p>
+<dl class="POD_LIST">
+<dt class="POD_ITEM"><a name="process_cgi_"><code>process([$cgi])</code></a>
+<dd>
+This is the main public method. It creates a 
+<code>File::Tabular::Web</code> instance and processes the request
+specified in CGI parameters, as explained below.
+<p class="POD_TEXT">
+The optional <code>$cgi</code> argument should be an instance of <u>CGI</u>;
+if you supply none, it will be created automatically.
+</p>
+<p></p>
+<dt class="POD_ITEM"><a name="can_do_action_record"><b>can_do($action, [$record])</b></a>
+<dd>
+This method is meant to be called from within templates; it
+tells whether the current user has permission to do 
+<code>$action</code> (which might be 'edit', 'delete', etc.).
+See explanations below about how permissions are specified
+in the initialisation file.
+Sometimes permissions are setup in a record-specific way
+(for example one data field may contain the names of 
+authorized users); the second optional argument 
+is meant for those cases, so that <code>can_do()</code> can inspect the current
+data record.
+<dt class="POD_ITEM"><a name="url_which_"><b>url([$which])</b></a>
+<dd>
+This method is meant to be called from within templates.
+It returns the url to the current web application.
+The optional argument <code>$which</code> specifies a particular
+entry point into the application :
+<dl class="POD_LIST">
+<dt class="POD_ITEM"><a name="add1">add</a>
+<dd>
+create a new record
+<dt class="POD_ITEM"><a name="all">all</a>
+<dd>
+display all records
+<dt class="POD_ITEM"><a name="home1">home</a>
+<dd>
+display homepage
+<dt class="POD_ITEM"><a name="download">download</a>
+<dd>
+display &quot;download page&quot;
+</dl>
+</dl>
+<p></p>
+<h2 class="POD_HEAD1"><a name="PRIVATE_METHODS1">PRIVATE METHODS</a></h2>
+<p class="POD_TEXT">
+Below are methods for internal use within the class. 
+Normally there is no reason to call them directly ; 
+they are documented just in case you should ever 
+redefine them in subclasses.
+</p>
+<dl class="POD_LIST">
+<dt class="POD_ITEM"><a name="new_cgi_"><code>new([$cgi])</code></a>
+<dd>
+Creates a new instance of <code>File::Tabular::CGI</code>, associates it 
+with a <code>CGI</code> object (either newly created or received as optional
+argument) and with a <code>Template</code> object, 
+and reads the configuration file.
+<dt class="POD_ITEM"><a name="read_config_"><code>read_config()</code></a>
+<dd>
+Reads configuration file in <code>Appconfig</code> format.
+Complains from <code>Appconfig</code> about undefined variables
+are discarded; other errors are propagated to the user.
+</dl>
+<h2 class="POD_HEAD1"><a name="TODO">TODO</a></h2>
+<pre class="POD_VERBATIM">
+  - can_do : deal with groups GE-JUSTICE
+  - print doc if no path_info
+  - path to global templates : option
+  - find better security model for action 'add'
+  - doc : show example of access to fileTabular-&gt;mtime-&gt;{hour}
+  - server-side record validation using &quot;F::T where syntax&quot; (f1 &gt; val, etc.)
+    or using code hook
+  - cache cfg if running under mod_perl Registry
+  - generalize empty_record (design config params)
+  - template for $self-&gt;delete (either default or user-supplied)
+  - support for path given without PATH_INFO : still useful ??
+      context : 1) mod_perl ; 2) Apache handler (cgi-bin) ; 3) cgi-bin/app/path
+  - config property for allowing/disallow multiple Delete or multiple Update
+  - view abstraction for direct display of attached doc 
+  - update : how to handle name conflicts : field names / builtin 
+    names (sortBy, score, excerpts, etc.)
+  - better abstraction for PRE handler according to U=.. (build/search)
+  - remove direct link to GE::Justice::AnyDoc2Txt, need abstracted converter
+  - more clever generation of wordsQueried in search
+  - remove direct call to $upld_field/...
+  - enqueue : remove GE::Justice dependencies (FichierWord, etc.)
+</pre>
+<p></p>
+<p></p>
+<p></p>
+<p></p>
+<hr>
+<a class="POD_NAVLINK" href="#Pod_TOP_OF_PAGE">[Top]</a>
+Generated by Marek::Pod::HTML 0.49 on Fri Aug  4 09:01:23 2006
+</body>
+</html>
+
