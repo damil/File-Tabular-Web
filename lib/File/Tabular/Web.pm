@@ -76,7 +76,7 @@ sub new {
 
   my $path = $cgi->path_translated || $ENV{SCRIPT_FILENAME}; # for ModPerl
 
-  my $path = $cgi->path_translated;
+  #gerberri 25-01-2007# my $path = $cgi->path_translated;
 
 
 
