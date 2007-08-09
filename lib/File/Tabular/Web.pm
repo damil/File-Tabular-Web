@@ -1,18 +1,31 @@
 =begin comment
 
-CHANGES
+TODO 
 
+ - check good working of orderBy
+ - system to control headers
+ - automatically set expire header if modify is enabled
+ - support both "modif" and "modify"
+ - create logger in new() + use Time::HiRes
+ - doc : show example of access to fileTabular->mtime->{hour}
+ - server-side record validation using "F::T where syntax" (f1 > val, etc.)
+    or using code hook
+ - template for $self->delete (either default or user-supplied)
+ - more clever generation of wordsQueried in search
+ - check config file (exists, non-empty, valid)
+ - options qw/preMatch postMatch avoidMatchKey fieldSep recordSep/
+    should be in a specific section
 
-## TODO : ADD in each decis *.app
-    [filters]
-    htmlDecis      = decisHtmlFilterFactory, 1
-    autoDecisLinks = autoDecisLinks
+TO CHECK WHEN UPGRADING
 
-TODO : create logger in new()
-
-TODO: HTTP headers out of template
-
-     - rename getCGI => param
+  - permissions, esp. permission to add/modif (see Jetons PH)
+ - 'add' permission without 'modif' 
+  - Minutes, links to getDecis, links F=...
+  - Minutes , specify class
+  - remove HTTP header from templates
+  - using groups in permissions
+  - remove calls to [% self.url('foobar') %]
+  - replace [fixed]tmpl_dir by [template]dir
 
 =end comment
 
@@ -20,11 +33,9 @@ TODO: HTTP headers out of template
 
 
 
+package File::Tabular::Web; # documentation at bottom of file
 
-package File::Tabular::Web;
-
-our $VERSION = "0.11"; 
-
+our $VERSION = "0.12"; 
 
 use strict;
 use warnings;
@@ -42,172 +53,115 @@ use File::Tabular;
 use Search::QueryParser;
 
 my %app_cache;
+my %datafile_cache;      #  persistent data private to _cached_content
 
-#----------------------------------------------------------------------
-sub process { # create a new instance and immediately process request
-#----------------------------------------------------------------------
-  my $self;
-  eval { $self = new(@_);  $self->dispatch_request; 1;}
-    or do {
-      $self ||= {};  # fake object just in case the new() method failed
-      $self->{msg} = "<b><font color=red>ERROR</font></b> : $@";
-      print "Content-type: text/html\n\n\n";
 
-      # try displaying through msg view..
-      eval {$self->{app}{tmpl}->process($self->tmpl_name('msg'), 
-                                        {self => $self})}
-        # .. or else fallback with simple HTML page
-        or print "<html>$self->{msg}</html>\n";
+# Methods names starting with an '_' should not be overridden 
+# in subclasses !
 
-    };
-}
+
+#======================================================================
+#             MAIN ENTRY POINT (for modperl or cgi-bin)               #
+#======================================================================
 
 
 #----------------------------------------------------------------------
-sub new { 
+sub handler : method { 
 #----------------------------------------------------------------------
   my $class = shift;
+  my $self;
+  eval { $self = $class->_new(@_);  $self->_dispatch_request; 1;}
+    or do {
+      $self ||= bless {}, $class;  # fake object if the new() method failed
+      $self->{msg} = "<b><font color='red'>ERROR</font></b> : $@";
+      $self->{view} = 'msg';
 
+      # try displaying through msg view..
+      eval {$self->_display}
+        # .. or else fallback with simple HTML page
+        or print "Content-type: text/html\n\n\n"
+               . "<html>$self->{msg}</html>\n";
+    };
 
-  my $cgi =  shift; 
-
-  $cgi = CGI->new() unless $cgi and $cgi->isa('CGI'); # for ModPerl
-  $cgi = CGI->new() if not $cgi;
-
-  my $path = $cgi->path_translated || $ENV{SCRIPT_FILENAME}; # for ModPerl
-
-  #gerberri 25-01-2007# my $path = $cgi->path_translated;
-
-
-
-  my $app = $app_cache{$path} ||= new_app($path);
-
-  my $self = {};
-  bless $self, ($app->{class} || $class);
-
-  $self->{cgi}  = $cgi;
-  $self->{user} = $cgi->remote_user() || "Anonymous";
-  $self->{url}  = $cgi->url(-path => 1);
-  $self->{msg}  = undef;
-  $self->{app}  = $app;
-  $self->{cfg}  = $self->{app}{cfg}; # shortcut
-
-  return $self->initialize_request;
+  return 0; # Apache2::Const::OK;
 }
 
 
-#----------------------------------------------------------------------
-sub initialize_request {
-#----------------------------------------------------------------------
-  my $self = shift;
-
-  # setup some general parameters
-  my %builtin_defaults = (max    => 500,   # max records retrieved	
-			  count  => 50,    # how many records in a single slice
-			  sortBy => "",	   # default sort criteria
-			 );
-  while (my ($k, $v) = each %builtin_defaults) {
-    $self->{$k} 
-      = $self->{cfg}->get("fixed_$k")   || # fixed value in config, or
-	$self->param($k)               || # given in CGI param, or 
-        $self->{cfg}->get("default_$k") || # default value in config, or
-        $v;                                # builtin default
-  }
-  return $self;
-}
+#======================================================================
+#     METHODS FOR CREATING / INITIALIZING "APPLICATION" HASHREFS      #
+#======================================================================
 
 #----------------------------------------------------------------------
-sub new_app { 
+sub _app_new { # creates a new application hashref (not an object)
 #----------------------------------------------------------------------
-  my $config_file = shift;
-
+  my ($class, $config_file) = @_;
   my $app = {};
 
-  # find apache directory, one level above document_root
-  ($app->{apache_dir}) = ($ENV{DOCUMENT_ROOT} =~ m[(.*)[/\\]]); 
-
-  # initialise from config file
-  my $cfg     = read_config($config_file);
-  $app->{cfg} = $cfg;
-
+  # application name and directory : defaults from the name of config file
   @{$app}{qw(appname dir suffix)} = fileparse($config_file, qr/\.[^.]*$/);
 
+  # read the config file
+  $app->{cfg} = $class->_app_read_config($config_file);
+  my $tmp;
 
-  $app->{tmpl_dir} =  $cfg->get("fixed_tmpl_dir") 
-                   || $cfg->get("default_tmpl_dir") 
-		   || "lib/tmpl/tdb";
+  # application directory
+  $tmp = $app->{cfg}->get('application_dir')  and do {
+    $tmp =~ s{[^/\\]$}{/}; # add trailing "/" to dir if necessary
+    $app->{dir} = $tmp;
+  };
 
-  $app->{upload_fields} = $cfg->get('fields_upload'); # hashref
-  $app->{time_fields}   = $cfg->get('fields_time');   # hashref
-  my $dataFile          = $cfg->get("dataFile") || "$app->{appname}.txt";
-  $app->{dataFile}      = $app->{dir} . $dataFile;
-  $app->{queueDir}      = $cfg->get('fixed_queueDir'); 
+  # application name
+  $tmp = $app->{cfg}->get('application_name') and $app->{appname} = $tmp;
 
-  # load additional Perl code requested in config
-  my $modules_ref       = $cfg->get('perl_use');    # only keys, no values
-  $app->{class}         = $cfg->get('perl_class');  # optional base class
-  my $requires_ref      = $cfg->get('perl_require');# only keys, no values
-  my $eval_ref          = $cfg->get('perl_eval');   # ref to array of code
-  {
-    local @INC = ($app->{dir}, @INC);
-    foreach my $module (grep {$_} (keys %$modules_ref, $app->{class})) {
-      eval "use $module" or croak $@; 
-    }
-    foreach my $required (grep {$_} keys %$requires_ref) {
-      require $required or croak $!;
-    }
-    foreach my $code (@$eval_ref) {
-      eval $code or croak $@; 
-    }
-  }
+  # data file
+  $tmp = $app->{cfg}->get('application_data');
+  $app->{data_file} = $app->{dir} . ($tmp || "$app->{appname}.txt");
 
-  # [filters] config section, see L<Template::Filters>
-  my %filters = $cfg->varlist('^filters_', 1);
-  foreach my $filter (keys %filters) {
-    my ($func, $dynamic_flag) = split /\s*,\s*/, $filters{$filter};
-    no strict 'refs';
+  # application class
+  $tmp = $app->{cfg}->get('application_class') and do {
+    eval "use $tmp" or die $@; # dynamically load the requested code
+    $tmp->isa($class) or die "$tmp is not a $class";
+    $app->{class} = $tmp;
+  };
+  $app->{class} ||= $class; # default if not specified in config
 
-    my $func_ref = \&$func or croak "filter: unknown function, $func";
-    $filters{$filter} = [$func_ref, $dynamic_flag];
-  }
-
-  # initialize template toolkit object
-  $app->{tmpl} = Template->new({
-    INCLUDE_PATH => [$app->{dir}, "$app->{apache_dir}/$app->{tmpl_dir}"],
-    FILTERS      => \%filters,
-   });
+  # special fields
+  $app->{time_fields} = $app->{cfg}->get('fields_time');
+  $app->{user_field}  = $app->{cfg}->get('fields_user');
 
   return $app;
 }
 
-
-
-
-
-
 #----------------------------------------------------------------------
-sub read_config { # read configuration file through Appconfig
+sub _app_read_config { # read configuration file through Appconfig
 #----------------------------------------------------------------------
-  my $config_file = shift;
+  my ($class, $config_file) = @_;
 
-  my $cfg = AppConfig->new({
-        CASE   => 1,
-	CREATE => 1, 
-	ERROR  => sub {my $fmt = shift;
-                       croak(sprintf("AppConfig : $fmt\n", @_))
-                         unless $fmt =~ /no such variable/;
-                     },
-        GLOBAL => {ARGCOUNT => ARGCOUNT_ONE},
-       });
+  # error handler : die for all errors except "no such variable"
+  my $error_func = sub { 
+    my $fmt = shift;
+    die sprintf("AppConfig : $fmt\n", @_) 
+      unless $fmt =~ /no such variable/; 
+  };
 
-  $cfg->define(fieldSep => {DEFAULT => "|"});
-  foreach my $var (qw/perl_use      perl_require   
-		      fields_upload fields_default fields_time
-		      handlers_prepare  handlers_update/) {
-    $cfg->define($var => {ARGCOUNT => ARGCOUNT_HASH});
+  # create AppConfig object (options documented in L<AppConfig::State>)
+  my $cfg = AppConfig->new({ 
+    CASE   => 1,                         # case-sensitive
+    CREATE => 1,                         # accept dynamic creation of variables
+    ERROR  => $error_func,               # specific error handler
+    GLOBAL => {ARGCOUNT => ARGCOUNT_ONE},# default option for undefined vars
+  });
+
+  # define specific options for some variables
+  # NOTE : fields_upload should really belong to FTW::Attachments, 
+  #        but cannot be put there because that class cannot be known
+  #        before we have read the config file !
+  foreach my $hash_var (qw/fields_upload fields_default fields_time/) {
+    $cfg->define($hash_var => {ARGCOUNT => ARGCOUNT_HASH});
   }
-  $cfg->define(perl_eval => {ARGCOUNT => ARGCOUNT_LIST});
+  $cfg->define(fieldSep  => {DEFAULT => "|"});
 
+  # read the configuration file
   $cfg->file($config_file); # or croak "AppConfig: open $config_file: $^E";
   # BUG : AppConfig does not return any error code if ->file(..) fails !!
 
@@ -217,198 +171,364 @@ sub read_config { # read configuration file through Appconfig
 
 
 #----------------------------------------------------------------------
-sub find_operation { # returns a ref to the named function
+sub app_initialize {
 #----------------------------------------------------------------------
-  my $self = shift;
-  my $operation_name = shift or return undef; 
+  # NOTE: this method is called after instance creation and therefore
+  # takes into account the subclass which may have been given in the
+  # config file.
 
-  no strict 'refs';
-  my $code_ref = $self->can($operation_name)    # find either a method ..
-              || *{$operation_name}{CODE}       # .. or a loaded function
-    or croak "no such operation : $operation_name";
+  my ($self) = @_;
+  my $app    = $self->{app};
 
-  return $code_ref;
+  # directories to search for Templates
+  my @tmpl_dirs = map {$_} ($app->{cfg}->get("template_dir"), 
+                            $app->{dir}, 
+                            $self->app_tmpl_default_dir);
+
+  # initialize template toolkit object
+  $app->{tmpl} = Template->new({
+    INCLUDE_PATH => \@tmpl_dirs,
+    FILTERS      => $self->app_tmpl_filters,
+   });
+}
+
+
+#----------------------------------------------------------------------
+sub app_tmpl_default_dir { # default; override in subclasses
+#----------------------------------------------------------------------
+  my ($self) = @_;
+
+  # guess where the server root is
+  my $server_root = 
+    $self->{modperl} ? Apache2::ServerUtil::server_root() 
+                     : ($ENV{DOCUMENT_ROOT} =~ m[(.*)[/\\]])[0];
+
+  return "$server_root/lib/tmpl/ftw";
+}
+
+
+#----------------------------------------------------------------------
+sub app_tmpl_filters { # default; override in subclasses
+#----------------------------------------------------------------------
+  my ($self) = @_;
+
+  return {}; # empty record; 
 }
 
 
 
 
 #----------------------------------------------------------------------
-sub dispatch_request { # look at CGI args and choose appropriate handling
+sub app_phases_definitions {
 #----------------------------------------------------------------------
-  my $self = shift;
+  my $class = shift;
 
-  # 1) alias expansion
-  $self->expand_aliases;
+# PHASES DEFINITIONS TABLE : each single letter is expanded into 
+# optional methods for data preparation, data operation, and view.
+  return (
 
-  # 2) data access
-  $self->open_data;
+    A => # prepare a new record for adding
+      {pre => 'empty_record',                           view => 'modif'   },
 
-  # 3) data preparation
-  my $preparation_phase = $self->find_operation($self->param('PRE'));
-  $preparation_phase->($self) if $preparation_phase;
+    D => # delete record
+      {pre => 'search_key',     op => 'delete'                            },
 
-  # 4) pre-check rights
-  my $perm = $self->param('PC');
-  not($perm) or $self->can_do($perm) or 
-    croak "No permission '$perm' for $self->{user}";
+    H => # display home page
+      {                                                 view => 'home'    },
 
-  # 5) data manipulation
-  my $manipulation_phase = $self->find_operation($self->param('OP'));
-  $manipulation_phase->($self) if $manipulation_phase;
+    L => # display "long" view of one single record
+      {pre => 'search_key',                             view => 'long'    },
 
-  # 6) view
-  if ($self->{redirect_target}) {
-    print $self->{cgi}->redirect($self->{redirect_target});
-  }
-  else {
-    my $view = $self->param('V');
-    $view = 'msg' if $self->{msg}; # force message view if there is a message
-    print $self->{cgi}->header;
-    $self->display($view);
-  }
-}
+    M => # display modify view (form for update)
+      {pre => 'search_key',                             view => 'modif'   },
 
+    S => # search and display "short" view
+      {pre => 'search',         op => 'sort_and_slice', view => 'short'   },
 
-#----------------------------------------------------------------------
-BEGIN { # persistent data private to expand_aliases()
+    U => # update
+      {pre => 'prepare_update', op => 'update'                            },
 
-# ALIAS EXPANSION TABLE : each single letter alias is expanded into 
-# several CGI params : (SS, PRE, PC, OP, V). See L</dispatch_request>
-# for the meaning of those. Values of expansions are either constants, 
-# or functional transformations of the supplied CGI argument. Aliases are :
-#   S => search and display "short" view
-#   L => display "long" view of one single record
-#   M => display modify view (form for update)
-#   A => add new record
-#   D => delete record (no PC, permissions checked within 'delete' method)
-#   U => update        (no PC, permissions checked within 'update' method)
-#   X => display all records in "download view"
-#      # NOTE : we don't set SS => "*", this would be inefficient. Instead,
-#      # rows will be fetched from within the download template, i.e.
-#      # [% WHILE row = app.data.fetchrow %] ... display data row
-#
-#   H => display home page
-#   F => display attached file
+    X => # display all records in "download view" (mnemonic: eXtract)
+      {pre => 'prepare_download',                       view => 'download'},
 
-  my $id_func   = sub {shift};
-  my $upd_func  = sub {my $val = shift; 
-		       return $val =~/#/ ? 'empty_record' : 'search_key';},
-  my $file_func = sub {"Decision:$_[0]"}; # PG-GE specific;TODO: move elsewhere
-
-  my @alias_headers = 
-    qw/   SS           PRE              PC      OP             V        /;
-#         ==           ===              ==      ==             =
-  my %aliases = (
-    S => [$id_func,   'search',        'read', 'post_search', 'short'   ],
-    L => [$id_func,   'search_key',    'read', '',            'long'    ],
-    M => [$id_func,   'search_key',    'read', '',            'modif'   ],
-    A => [$id_func,   'empty_record',  'add',  '',            'modif'   ],
-    D => [$id_func,   'search_key',    '',     'delete',      ''        ],
-    U => [$id_func,   $upd_func,       '',     'update',      ''        ],
-    X => ['',         '',              '',     '',            'download'],
-    H => ['',         '',              '',     '',            'home'    ],
-    F => [$file_func, 'search',        'read', '',            'long'    ],
    );
-
-  
-  #----------------------------------------------------------------------
-  sub expand_aliases { # normalize request, expanding aliases into CGI params
-  #----------------------------------------------------------------------
-    my $self = shift;
-
-    $self->{cgi}->param(V => 'home') unless $self->param('V'); # default value
-
-    my ($alias, @others) = grep {defined $self->{cgi}->param($_)} keys %aliases
-      or return; # no alias to expand
-    croak "alias expansion conflict" if @others; # can't expand several
-
-    my $passed_value = $self->param($alias);
-    my $expansion = $aliases{$alias};
-
-    for my $ix (0 .. $#alias_headers) { # OK, do each expansion
-      my $new_param = $alias_headers[$ix];
-      my $new_val   = $expansion->[$ix];
-      if (UNIVERSAL::isa($new_val, 'CODE')) { # expansion is a func transform
-        $new_val = $new_val->($passed_value);
-      }
-      $self->{cgi}->param($new_param => $new_val); # inject into CGI param
-    }
-  }
 }
+
+
+
+#======================================================================
+#           METHODS FOR INSTANCE CREATION / INITIALIZATION            #
+#======================================================================
+
 #----------------------------------------------------------------------
+sub _new { # creates a new instance of a request object
+#----------------------------------------------------------------------
+  my ($class, $modperl) = @_;
+
+  my $self = {};
+
+  # if under mod_perl, we got an Apache2::RequestRec as second arg
+  if (ref($modperl) =~ /^Apache/) {
+    $self->{modperl} = $modperl;
+  }
+
+  # create the CGI instance, and get various info from it
+  $self->{cgi}  = CGI->new($modperl);
+  $self->{user} = $self->{cgi}->remote_user || "Anonymous";
+  $self->{url}  = $self->{cgi}->url(-path => 1);
+
+  # get path of config file, then find or create the app structure
+  my $path = $self->{modperl}
+             ? $self->{modperl}->filename
+             : $self->{cgi}->path_translated;
+  my $must_initialize_app = not $app_cache{$path};
+  $self->{app} = $app_cache{$path} ||= $class->_app_new($path);
+  $self->{cfg} = $self->{app}{cfg}; # shortcut
+
+  # bless the request obj into the application class, initialize and return
+  bless $self, $self->{app}{class};
+  $self->app_initialize if $must_initialize_app;
+  $self->initialize;
+  return $self;
+}
 
 
 #----------------------------------------------------------------------
-sub open_data { # open File::Tabular object on data file
+sub initialize { # setup params from config and/or CGI params
 #----------------------------------------------------------------------
   my $self = shift;
 
-  my $file_name = $self->{app}{dataFile};
+  # default values
+  $self->{max}     = $self->param('max')   || 500;
+  $self->{count}   = $self->param('count') ||  50;
+  $self->{orderBy} = $self->param('orderBy') 
+                  || $self->param('sortBy'); # for backwards compatibility
+
+  return $self;
+}
+
+
+#----------------------------------------------------------------------
+sub _setup_phases { # decide about next phases
+#----------------------------------------------------------------------
+  my $self = shift;
+
+  # get all phases definitions (expansions of single-letter param)
+  my %request_phases = $self->app_phases_definitions;
+
+  # find out which single-letter was requested
+  my ($letter, @others) = grep {defined $self->param($_)} keys %request_phases;
+  if (@others) {
+    my $in_conflict = join " / ", $letter, @others;
+    die "conflict in request: $in_conflict";
+  }
+  $letter ||= 'H'; # by default : homepage
+
+  # setup info in $self according to the chosen letter
+  my $phases = $request_phases{$letter};
+  $self->{view} = $self->param('V') || $phases->{view};
+  $self->{pre}  = $phases->{pre};
+  $self->{op}   = $phases->{op};
+
+  return $self->param($letter);
+}
+
+
+#----------------------------------------------------------------------
+sub _open_data { # open File::Tabular object on data file
+#----------------------------------------------------------------------
+  my $self = shift;
+
+  my $file_name      = $self->{app}{data_file};
+  my $use_file_cache = $self->{cfg}->get('application_useFileCache');
 
   # choose how to open the file
   my @openParams = 
-    ($self->param("OP") =~ /delete|update/) ? ("+< $file_name") : # open RW
-    (not $self->{cfg}->get('useFileCache'))  ? ($file_name)      : # open ROnly
-       do { my $content = _cached_content($file_name);
-	    ('<', \$content);                      #  open from the memory copy
+    ($self->{op} =~ /delete|update/)        ? ("+< $file_name") : # open RWrite
+    (not $use_file_cache)                   ? ($file_name)      : # open ROnly
+       do { my $cache_entry = $self->_cached_content($file_name);
+	    ('<', $cache_entry->{content}); #  open from the memory copy
 	  };
 
   # set up options for creating File::Tabular object
   my %options;
-  my @config_opts = qw/preMatch postMatch avoidMatchKey fieldSep recordSep/;
-  $options{$_} = $self->{cfg}->get($_) foreach @config_opts;
+  foreach (qw/preMatch postMatch avoidMatchKey fieldSep recordSep/) {
+    $options{$_} = $self->{cfg}->get($_);
+  }
 
   $options{autoNumField} = $self->{cfg}->get('fields_autoNum');
   my $jFile = $self->{cfg}->get('journal');
-  $options{journal} = "$self->{dir}$jFile" if $jFile;
+  $options{journal} = "$self->{app}{dir}$jFile" if $jFile;
 
-  # do it
+  # create File::Tabular object
   $self->{data} = new File::Tabular(@openParams, \%options);
-  $self->{data}->ht->add('score'); # new field for storing 'score'
 }
 
 
 #----------------------------------------------------------------------
-BEGIN {
-  my %datafile_cache; #  persistent data private to _cached_content
+sub _cached_content { # if cfg->get('useFileCache'), keep datafile in memory
+#----------------------------------------------------------------------
+  my ($self, $file_name) = @_;
 
-  #----------------------------------------------------------------------
-  sub _cached_content {
-  #----------------------------------------------------------------------
-    my $file_name = shift;
+  # get file last modification time
+  my $mtime = (stat $file_name)[9] or die "couldn't stat $file_name";
 
-    # get file last modification time
-    my $mtime = (stat $file_name)[9] or croak "couldn't stat $file_name";
-
-    # delete cache entry if too old
-    if ($datafile_cache{$file_name} &&  
-	  $mtime > $datafile_cache{$file_name}->{mtime}) {
-      delete $datafile_cache{$file_name};	              
-    }
-
-    # create cache entry if necessary
-    $datafile_cache{$file_name} ||= do {
-      open my $fh, $file_name or croak "open $file_name : $^E";
-      local $/ = undef;
-      my $content = <$fh>;	# slurps the whole file into memory
-      close $fh;
-      {mtime => $mtime, content => $content}; # return val from do{} block
-    };
-
-    return $datafile_cache{$file_name}->{content};
+  # delete cache entry if too old
+  if ($datafile_cache{$file_name} &&  
+        $mtime > $datafile_cache{$file_name}->{mtime}) {
+    delete $datafile_cache{$file_name};
   }
+
+  # create cache entry if necessary
+  $datafile_cache{$file_name} ||= do {
+    open my $fh, $file_name or die "open $file_name : $^E";
+    local $/ = undef;
+    my $content = <$fh>;	# slurps the whole file into memory
+    close $fh;
+    { mtime => $mtime, content => $content }; # return val from do{} block
+  };
+
+  return $datafile_cache{$file_name};
 }
+
+
+
+
+
+#======================================================================
+#               PUBLIC METHODS CALLABLE FROM TEMPLATES                #
+#======================================================================
+
+
 #----------------------------------------------------------------------
+sub param { # always returns a scalar value 
+#----------------------------------------------------------------------
+  my ($self, $p) = @_;
 
+  # first check in "fixed" section in config
+  my $val = $self->{cfg}->get("fixed_$p");
+  return $val if $val;
+
+  # then check in parameters to this request
+  my @vals = $self->{modperl} ? $self->{modperl}->param($p)
+                              : $self->{cgi}->param($p);
+  if (@vals) {
+    $val = join(' ', @vals);    # join multiple values
+    $val =~ s/^\s+//;           # remove initial spaces
+    $val =~ s/\s+$//;           # remove final spaces
+    return $val;
+  }
+
+  # finally check in "default" section in config
+  return $self->{cfg}->get("default_$p");
+}
 
 
 #----------------------------------------------------------------------
-sub search_key { # search one single record
+sub can_do { # can be called from templates; $record is optional
+#----------------------------------------------------------------------
+  my ($self, $action, $record) = @_;
+
+  my $allow  = $self->{cfg}->get("permissions_$action");
+  my $forbid = $self->{cfg}->get("permissions_no_$action");
+
+  # some permissions are granted by default to everybody
+  $allow ||= "*" if $action =~ /^(read|search|download)$/;
+
+  for ($allow, $forbid) {
+    $_ = $self->user_match($_)    #    if acl list matches user name
+       ||(   /\$(\S+)\b/i         # or if acl list contains a field name ...
+	  && defined($record)                   # ... and got a specific record
+          && defined($record->{$1})             # ... and field is defined
+	  && $self->user_match($record->{$1})); # ... and field content matches
+  }
+
+  return $allow and not $forbid;
+}
+
+
+
+#======================================================================
+#                 REQUEST HANDLING : GENERAL METHODS                  #
+#======================================================================
+
+
+#----------------------------------------------------------------------
+sub _dispatch_request { # go through phases and choose appropriate handling
 #----------------------------------------------------------------------
   my $self = shift;
+  my $method;
 
-  my $query = "K_E_Y:" . $self->param('SS');
+  # determine phases from single-letter param; keep arg value from that letter
+  my $letter_arg = $self->_setup_phases;
+
+  # data access
+  $self->_open_data;
+
+  # data preparation : invoke method if any, passing the arg saved above
+  $method = $self->{pre} and $self->$method($letter_arg);
+
+  # data manipulation : invoke method if any
+  $method = $self->{op} and $self->$method;
+
+  # force message view if there is a message
+  $self->{view} = 'msg' if $self->{msg}; 
+
+  # print the output
+  $self->_display;
+}
+
+
+#----------------------------------------------------------------------
+sub _display { # display results in the requested view
+#----------------------------------------------------------------------
+  my ($self) = @_;
+  my $view = $self->{view} or die "display : no view";
+
+  # name of the template for this view
+  my $tmpl_name = $self->{cfg}->get("template_$view")
+               || "$self->{app}{appname}_$view.tt";
+
+  # call that template
+  my $body;
+  my $vars = {self => $self, found => $self->{results}};
+  $self->{app}{tmpl}->process($tmpl_name, $vars, \$body)
+    or die $self->{app}{tmpl}->error();
+
+  # print headers and body
+  my $length   = length $body;
+  my $modified = $self->{data}->stat->{mtime};
+  if ($self->{modperl}) {
+    $self->{modperl}->set_last_modified($modified);
+    $self->{modperl}->set_content_length($length);
+    $self->{modperl}->print($body);
+  }
+  else {
+    my $CRLF = "\015\012";
+    print "Content-type: text/html$CRLF"
+        . "Content-length: $length$CRLF"
+        . "Last-modified: $modified$CRLF"
+        . "$CRLF"
+        . $body;
+  }
+}
+
+
+
+#======================================================================
+#                 REQUEST HANDLING : SEARCH METHODS                   #
+#======================================================================
+
+
+#----------------------------------------------------------------------
+sub search_key { # search by record key
+#----------------------------------------------------------------------
+  my ($self, $key) = @_;
+  $self->can_do("read") or 
+    die "no 'read' permission for $self->{user}";
+  $key or die "search_key : no key!";
+
+  my $query = "K_E_Y:$key";
   my ($records, $lineNumbers) = $self->{data}->fetchall(where => $query);
   my $count = @$records;
   $self->{results} = {count       => $count, 
@@ -417,42 +537,18 @@ sub search_key { # search one single record
 }
 
 
-#----------------------------------------------------------------------
-sub words_queried {
-#----------------------------------------------------------------------
-  my $self = shift;
-  my $search_string   = $self->param('SS');
-  return ($search_string =~ m([\w/]+)g);
-}
-
-
-
-sub log_search {
-  my $self = shift;
-  return if not $self->{logger};
-
-  my $msg = "[$self->{search_string}] $self->{user}";
-  $self->{logger}->info($msg);
-}
-
-
-sub prepare_search_string {
-  my $self = shift;
-  $self->{search_string} = $self->param('SS') || "";
-  return $self;
-}
-
-sub end_search_hook {}
 
 #----------------------------------------------------------------------
 sub search { # search records and display results
 #----------------------------------------------------------------------
-  my $self = shift;
+  my ($self, $search_string) = @_;
 
-  $self->can_do("search") or 
-    croak "no 'search' permission for $self->{user}";
+  # check permissions
+  $self->can_do('search') or 
+    die "no 'search' permission for $self->{user}";
 
-  $self->prepare_search_string;
+  $self->{search_string_orig} = $search_string;
+  $self->before_search;
   $self->log_search;
 
   $self->{results} = {count       => 0, 
@@ -465,12 +561,12 @@ sub search { # search records and display results
 
   # compile query with an implicit '+' prefix in front of every item 
   my $parsedQ = $qp->parse($self->{search_string}, '+') or 
-    croak "error parsing query : $self->{search_string}";
+    die "error parsing query : $self->{search_string}";
 
   my $filter;
 
   eval {$filter = $self->{data}->compileFilter($parsedQ);} or
-    croak("error in query : $@ ," . $qp->unparse($parsedQ) 
+    die("error in query : $@ ," . $qp->unparse($parsedQ) 
                                   . " ($self->{search_string})");
 
   # perform the search
@@ -478,8 +574,6 @@ sub search { # search records and display results
     $self->{data}->fetchall(where => $filter);
   $self->{results}{count} = @{$self->{results}{records}};
 
-  $self->end_search_hook;
-  
   # VERY CHEAP way of generating regex for highlighting results
   my @words_queried = uniq(grep {length($_)>2} $self->words_queried);
   $self->{results}{wordsQueried} = join "|", @words_queried;
@@ -487,28 +581,29 @@ sub search { # search records and display results
 
 
 #----------------------------------------------------------------------
-sub post_search { 
+sub before_search {
 #----------------------------------------------------------------------
-  my $self = shift;
-
-  $self->sortAndSlice;
+  my ($self) = @_;
+  $self->{search_string} = $self->{search_string_orig} || "";
+  return $self;
 }
 
 
+
 #----------------------------------------------------------------------
-sub sortAndSlice { # sort results, then just keep the desired slice
+sub sort_and_slice { # sort results, then just keep the desired slice
 #----------------------------------------------------------------------
   my $self = shift;
 
   delete $self->{results}{lineNumbers}; # not going to use those
 
   # sort results
-  if ($self->{sortBy}) {
+  if ($self->{orderBy}) {
     eval {
-      my $cmpfunc = $self->{data}->ht->cmp($self->{sortBy});
+      my $cmpfunc = $self->{data}->ht->cmp($self->{orderBy});
       $self->{results}{records} = [sort $cmpfunc @{$self->{results}{records}}];
     }
-      or croak "sortBy : $@";
+      or die "orderBy : $@";
   }
 
   # restrict to the desired slice
@@ -518,44 +613,96 @@ sub sortAndSlice { # sort results, then just keep the desired slice
   $self->{results}{records} = 
     [ @{$self->{results}{records}}[$start_record ... $end_record] ];
 
-  # for user display : record numbers starting with 1, not 0 
+  # check read permission on records (looping over records only if necessary)
+  my $must_loop_on_records # true if  permission depends on record fields
+    =  (($self->{cfg}->get("permissions_read") || "")    =~ /\$/)
+    || (($self->{cfg}->get("permissions_no_read") || "") =~ /\$/);
+  if ($must_loop_on_records) {
+    foreach my $record (@{$self->{results}{records}}) {
+      $self->can_do('read', $record) 
+        or die "no 'read' permission for $self->{user}";
+    }
+  }
+  else { # no need for a loop
+    $self->can_do('read') 
+      or die "no 'read' permission for $self->{user}";
+  }
+
+  # for user display : record numbers start with 1, not 0 
   $self->{results}{start} = $start_record + 1;
   $self->{results}{end}   = $end_record + 1;
 
 
-  # compute links to previous/next slice
-  my $urlreq = "?S=" . $self->param('SS') .
-               "&SFT=" . $self->param('SFT') .
-	       "&sortBy=$self->{sortBy}" .
-	       "&count=$self->{count}";
+  # links to previous/next slice
   my $prev_idx = $start_record - $self->{count};
      $prev_idx = 0 if $prev_idx < 0;
-  my $next_idx = $start_record + $self->{count};
-
-  $self->{results}{prev_link} = uri_escape("$urlreq&start=$prev_idx")
+  $self->{results}{prev_link} = $self->_url_for_next_slice($prev_idx)
     if $start_record > 0;
-  $self->{results}{next_link} = uri_escape("$urlreq&start=$next_idx")
+  my $next_idx = $start_record + $self->{count};
+  $self->{results}{next_link} = $self->_url_for_next_slice($next_idx)
     if $next_idx < $self->{results}{count};
 }
 
 
 #----------------------------------------------------------------------
-sub display { # display results in the requested view
+sub _url_for_next_slice { 
 #----------------------------------------------------------------------
-  my ($self, $view) = @_;
+  my ($self, $start) = @_;
 
-  my $tmpl_name = $self->tmpl_name($view);
+  my $url = "?" . join "&", $self->params_for_next_slice($start);
 
-  $self->{app}{tmpl}->process($tmpl_name, {self => $self, 
-                                           found => $self->{results}})
-    or croak $self->{app}{tmpl}->error();
+  # uri encoding
+  $url =~ s/([^;\/?:@&=\$,A-Z0-9\-_.!~*'() ])/sprintf("%%%02X", ord($1))/ige;
+
+  return $url;
 }
 
 
 #----------------------------------------------------------------------
-sub empty_record { 
+sub params_for_next_slice { 
+#----------------------------------------------------------------------
+  my ($self, $start) = @_;
+
+  my @params = ("S=$self->{search_string_orig}", "start=$start");
+  push @params, "orderBy=$self->{orderBy}" if $self->{orderBy};
+  push @params, "count=$self->{count}"  if $self->{count};
+  return @params;
+}
+
+
+#----------------------------------------------------------------------
+sub words_queried {
 #----------------------------------------------------------------------
   my $self = shift;
+  return ($self->{search_string_orig} =~ m([\w/]+)g);
+}
+
+
+
+#----------------------------------------------------------------------
+sub log_search {
+#----------------------------------------------------------------------
+  my $self = shift;
+  return if not $self->{logger};
+
+  my $msg = "[$self->{search_string}] $self->{user}";
+  $self->{logger}->info($msg);
+}
+
+
+#======================================================================
+#                 REQUEST HANDLING : UPDATE METHODS                   #
+#======================================================================
+
+
+#----------------------------------------------------------------------
+sub empty_record { # to be displayed in "modif" view (when adding)
+#----------------------------------------------------------------------
+  my ($self) = @_;
+
+  $self->can_do("add") or 
+    die "no 'add' permission for $self->{user}";
+
   my $record = {};
   my $defaults = $self->{cfg}->get("fields_default");
   $record->{$_} = $defaults->{$_} foreach $self->{data}->headers;
@@ -564,162 +711,146 @@ sub empty_record {
 
 
 
-
 #----------------------------------------------------------------------
-sub delete {
+sub prepare_update { 
 #----------------------------------------------------------------------
-  my $self = shift;
-  my $found = $self->{results};
-  
-  all {$self->can_do("delete", $_)} @{$found->{records}} or
-    croak "No permission 'delete' for $self->{user}";
-
-  my @to_delete = map {($_, 1, undef)} @{$found->{lineNumbers}};
-  $self->{data}->splices(@to_delete);
-
-  $self->{msg} = "Deleted:<br>";
-  my @headers = $self->{data}->headers;
-  foreach my $record (@{$found->{records}}) {
-    my @values = @{$record}{@headers};
-    $self->{msg} .= join("|", @values) . "<br>";
-    $self->delete_record($record);
+  my ($self, $update_arg) = @_;
+  if ($update_arg =~ /$self->{data}{autoNumChar}/) { # adding new record
+    $self->empty_record;
+  }
+  else {
+     $self->search_key($update_arg);
   }
 }
-
-
-sub delete_record {}
 
 
 #----------------------------------------------------------------------
 sub update {
 #----------------------------------------------------------------------
-  my $self = shift;
-  my $found = $self->{results};
-  my %upldFiles;
-  my $dir = $self->{dir};
+  my ($self) = @_;
 
-  all {$self->can_do("modif", $_)} @{$found->{records}} or
-    croak "No permission 'delete' for $self->{user}";
+  # check if there is one record to update
+  my $found  = $self->{results};
+  $found->{count} == 1 or die "unexpected number of records to update";
 
-  $self->fixAutoNum;
-  $self->beforeUpdates;
+  # gather some info
+  my $record     = $found->{records}[0];
+  my $line_nb    = $found->{lineNumbers}[0]; 
+  my $is_adding  = $line_nb == -1;
+  my $permission = $is_adding ? 'add' : 'modif';
 
-  # for each record, prepare update instructions (@spliceArgs) and message
-  $self->{msg} = "Updated:<br><br>";
-  my @headers = $self->{data}->headers;
-  my @spliceArgs;
-  for (my $i = 0; $i < $found->{count}; $i++) {
-    my $line_nb   = $found->{lineNumbers}[$i]; # will be -1 if empty_record
-    my $record    = $found->{records}[$i];
-    my $to_delete = $line_nb == -1 ? 0         # no previous line to delete
-                                   : 1;        # replace previous line
-    push @spliceArgs, $line_nb, $to_delete, $record;
+  # check if user has permission
+  $self->can_do($permission, $record)
+    or die "No permission '$permission' for $self->{user}";
 
-    my $data_line = join("|", @{$record}{@headers});
-    my $id = $record->{$headers[0]};
-    $self->{msg} .= "<a href='?S=K_E_Y:$id'>Record $id</a>: $data_line<br>";
+  # if adding, must make sure to read all rows so that autonum gets updated
+  if ($is_adding &&  $self->{cfg}->get('fields_autoNum')) {
+    while ($self->{data}->fetchrow) {} 
   }
 
-  # do the updates
-  eval {$self->{data}->splices(@spliceArgs)} or do {
+  # call hook before update
+  $self->before_update($record);
+
+  # prepare message to user
+  my @headers = $self->{data}->headers;
+  my $data_line = join("|", @{$record}{@headers});
+  my $id = $record->{$headers[0]};
+  $self->{msg} = "Updated:<br><br>"
+               . "<a href='?S=K_E_Y:$id'>Record $id</a>: $data_line<br>";
+
+  # do the update
+  my $to_delete = $is_adding ? 0         # no previous line to delete
+                             : 1;        # replace previous line
+  eval {$self->{data}->splices($line_nb, $to_delete, $record)} or do {
     my $err = $@;
-    $self->cancel_before_updates;
-    croak $err;
+    $self->rollback_update;
+    die $err;
   };
 
-  $self->afterUpdates;
+  # call hook after update
+  $self->after_update;
 }
 
 
 #----------------------------------------------------------------------
-sub beforeUpdates { # 
+sub before_update { # 
+#----------------------------------------------------------------------
+  my ($self, $record) = @_;
+
+  # copy defined params into record ..
+  foreach my $field ($self->{data}->headers) {
+    my $val = $self->param($field);
+    $record->{$field} = $val unless not defined $val;
+  }
+
+  # force username into user field (if any)
+  my $user_field = $self->{user_field};
+  $record->{$user_field} = $self->{user} if $user_field;
+
+  # force current time or date into time fields (if any)
+  while (my ($k, $fmt) = each %{$self->{time_fields}}) {
+    $record->{$k} = strftime($fmt, localtime);
+  }
+}
+
+
+sub after_update    {} # override in subclasses
+sub rollback_update {} # override in subclasses
+
+
+#======================================================================
+#                 REQUEST HANDLING : DELETE METHODS                   #
+#======================================================================
+
+#----------------------------------------------------------------------
+sub delete {
 #----------------------------------------------------------------------
   my $self = shift;
 
-  foreach my $record (@{$self->{results}{records}}) {
+  # check if there is one record to update
+  my $found = $self->{results};
+  $found->{count} == 1 or die "unexpected number of records to delete";
 
-    # copy defined CGI params into record ..
-    foreach my $field ($self->{data}->headers) {
-      my $val = $self->param($field);
-      $record->{$field} = $val unless not defined $val;
-    }
+  # gather some info
+  my $record     = $found->{records}[0];
+  my $line_nb    = $found->{lineNumbers}[0]; 
 
-    # force username into user field (if any)
-    my $userField = $self->{cfg}->get('fields_user');
-    $record->{$userField} = $self->{user} if $userField;
+  # check if user has permission
+  $self->can_do("delete", $record) 
+    or die "No permission 'delete' for $self->{user}";
 
-    # force current time into time fields (if any)
-    while (my ($k, $fmt) = each %{$self->{time_fields}}) {
-      $record->{$k} = strftime($fmt, localtime);
-    } 
-  }
+  # call hook before delete
+  $self->before_delete($record);
+
+  # do the deletion
+  $self->{data}->splices($line_nb, 1, undef);
+
+  # message to user
+  my @headers = $self->{data}->headers;
+  my @values = @{$record}{@headers};
+  $self->{msg} = "Deleted:<br>" . join("|", @values);
+
+  # call hook after delete
+  $self->after_delete($record);
 }
 
 
-#----------------------------------------------------------------------
-sub afterUpdates {
-#----------------------------------------------------------------------
-}
+sub before_delete {} # override in subclasses
+sub after_delete  {} # override in subclasses
 
 
-#----------------------------------------------------------------------
-sub fixAutoNum { 
-#----------------------------------------------------------------------
-  my $self = shift;
-
-  # if this is a new record
-  if ($self->{cfg}->get('fields_autoNum') and $self->param('U') =~ /#/) {
-    while ($self->{data}->fetchrow) {} # do nothing, just make sure autonum
-                                       # gets updated
-  }
-}
-
-#----------------------------------------------------------------------
-sub can_do {
-#----------------------------------------------------------------------
-  my ($self, $action, $record) = @_;
-
-  my $allow  = $self->{cfg}->get("permissions_$action");
-  my $forbid = $self->{cfg}->get("permissions_no_$action") || "nobody";
-
-  for ($allow, $forbid) {
-    $_ = (not $_)                 # matches everybody if nothing specified
-       || $self->user_match($_)   # or if acl list matches user name
-       ||(   /\$(\S+)\b/i         # or if acl list contains a field name ...
-	  && defined($record)                   # ... and got a specific record
-          && defined($record->{$1})             # ... and field is defined
-	  && $self->user_match($record->{$1})); # ... and field content matches
-  }
-
-  return $allow and not $forbid;
-}
+#======================================================================
+#                       MISCELLANEOUS METHODS                         #
+#======================================================================
 
 
 
 #----------------------------------------------------------------------
-sub url { # give back various urls (to be used by templates)
+sub prepare_download {
 #----------------------------------------------------------------------
   my ($self, $which) = @_;
-
-  for ($which) {
-    /add/      and return "$self->{url}?A";
-    /all/      and return "$self->{url}?S=*";
-    /home/     and return "$self->{url}?H";
-    /download/ and return "$self->{url}?X";
-    /\S/       and return "bad url arg : $_";
-    return $self->{url};	# otherwise
-  }
-}
-
-#----------------------------------------------------------------------
-sub tmpl_name { # for a given operation, find associated template name
-#----------------------------------------------------------------------
-  my $self = shift;
-  my $op   = shift;
-
-  my $tmpl_name =  $self->{cfg}->get("template_$op") if $self->{cfg};
-  $tmpl_name ||= "$self->{app}{appname}_$op.tt";
-  return $tmpl_name;
+  $self->can_do('download')
+    or die "No permission 'download' for $self->{user}";
 }
 
 
@@ -729,58 +860,22 @@ sub print_help {
   print "sorry, no help at the moment";
 }
 
-#----------------------------------------------------------------------
-sub param {
-#----------------------------------------------------------------------
-  my ($self, $p) = @_;
-
-  my @vals = $self->{cgi}->param($p);
-  return undef if not @vals;
-
-  my $val = join(' ', @vals);	# join multiple values
-  $val =~ s/^\s+//;		# remove initial spaces
-  $val =~ s/\s+$//;		# remove final spaces
-  return $val;
-}
-
-
-
 
 
 #----------------------------------------------------------------------
 sub user_match {
 #----------------------------------------------------------------------
-  my $self = shift;
-  my $list = shift;
-  return ($list =~ /\b\Q$self->{user}\E\b/i);
+  my ($self, $access_control_list) = @_;
+
+  # success if the list contains '*' or the current username
+  return ($access_control_list =~ /\*|\b\Q$self->{user}\E\b/i);
 }
-
-
-
-
-######################################################################
-#                            UTILITY FUNCTIONS                       #
-######################################################################
-
-#----------------------------------------------------------------------
-sub uri_escape { # encode 
-#----------------------------------------------------------------------
-    my $uri = shift;
-    $uri =~ s{([^;\/?:@&=\$,A-Za-z0-9\-_.!~*'()])}
-             {sprintf("%%%02X", ord($1))         }ge;
-    return $uri;
-}
-
-
-
-
-
 
 
 1;
 
 
-__DATA__
+__END__
 
 =head1 NAME
 
@@ -788,26 +883,72 @@ File::Tabular::Web - turn a tabular file into a web application
 
 =head1 INTRODUCTION
 
-This is an Apache web application framework based on
+This is a simple Apache web application framework based on
 L<File::Tabular|File::Tabular> and
-L<Search::QueryParser|Search::QueryParser>.  It offers builtin
-services for searching, displaying and updating a flat tabular
-datafile.  It may run either under mod_perl Registry or under plain
-old cgi-bin.
+L<Search::QueryParser|Search::QueryParser>.  The framework offers
+builtin services for searching, displaying and updating a flat tabular
+datafile, possibly with attached documents (see
+L<File::Tabular::Web::Attachments|File::Tabular::Web::Attachments>).
 
-Setting up the framework just requires two directives within the
-Apache configuration.  Once this is done, all the webmaster has to do
-in order to build a new application is to supply the data (a tabular
-.txt file) and run the helper script C<ftw_new_app.pl>, which
-automatically builds configuration and template files for that
-application.  These files can then be edited for specific adaptations.
-No single line of Perl is needed, and the new URL becomes immediately
-active, without webserver configuration nor restart.
+The strong point of C<File::Tabular::Web> is that it is built
+around a powerful search engine, designed from the start for Web 
+requests : by default it searches for complete words, spanning
+all data fields. However, you can easily write queries that
+look in specific fields, using regular expressions, boolean
+combinations, arithmetic operators, etc.
+So if you are looking for simplicity and speed of development,
+rather than speed of execution, then you may have found a convenient
+tool. 
 
-For more advanced uses, application-specific Perl handlers can be
+We used it intensively in our Intranet for managing 
+lists of people, rooms, meetings, internet pointers, etc., and even
+for more sensitive information like lists of payments or 
+the archived judgements (minutes) of Geneva courts.
+Of course this is slower that a real database, 
+but for data up to 10MB/50000 records, the difference
+is hardly noticeable. On the other side, ease of
+development and deployment, ease of importing/exporting
+data proved to be highly valuable assets.
+
+
+=head2 Building an application
+
+To build an application, all you need to do is :
+
+=over
+
+=item *
+
+Insert the data (a tabular .txt file) somewhere
+in your Apache F<htdocs> tree.
+
+=item *
+
+Run the helper script L<ftw_new_app.pl>, which
+automatically builds configuration and template files.
+The new URL becomes immediately
+active, without webserver configuration nor restart, 
+so you already have a "scaffolding" 
+application for searching, displaying, and maybe
+edit the data.
+
+
+=item *
+
+If necessary, tune various options in the configuration file,
+and customize the template files for presenting the data
+according to your needs.
+
+=back
+
+In most cases, those steps will be sufficient, so
+they can be performed by a webmaster without Perl
+knowledge.
+
+For more advanced uses, application-specific Perl 
+subclasses  can be
 hooked up into the framework for performing particular tasks.
-Furthermore, subclassing can be used for extending the builtin 
-services. In particular, see the companion
+See for example the companion
 L<File::Tabular::Web::Attachments|File::Tabular::Web::Attachments>
 module, which provides services for attaching documents
 and indexing them through  L<Search::Indexer|Search::Indexer>,
@@ -816,51 +957,111 @@ therefore providing a mini-framework for storing electronic documents.
 
 =head1 QUICKSTART
 
-=head2 Setting up the framework
 
-Install the C<File::Tabular::Web> module in your local Perl site.
+=head2 Apache configuration
 
-In your apache/cgi-bin (or apache/perl if running under mod_perl Registry) :
-create a file named "ftw" containing 
+C<File::Tabular::Web> is designed so that it can be
+installed once and for all in your Apache configuration.
+Then all I<applications> can be added or modified
+on the fly, without restarting the server.
 
+First choose a file extension for your C<File::Tabular::Web> 
+applications; in the examples below we assume it to be C<.ftw>.
+Then configure your Apache server in one of the ways described
+below.
+
+
+=head3 Configuration as a mod_perl handler
+
+If you have mod_perl, the easiest way is to declare
+it as a mod_perl handler associated to C<.ftw> URLs.
+Edit your F<perl.conf> as follows :
+
+  PerlModule File::Tabular::Web
+  <LocationMatch "\.ftw$">
+    SetHandler modperl
+    PerlResponseHandler File::Tabular::Web
+  </LocationMatch>
+
+
+=head3 Configuration as a cgi-bin script
+
+Create an executable file in F<cgi-bin> directory, 
+named C<ftw>, and containing
+
+   #!/path/to/perl
    use File::Tabular::Web;
-   File::Tabular::Web->process;
+   File::Tabular::Web->handler;
 
-In your Apache configuration (httpd.conf), add directives :
+Then you can acces your applications as
 
-  Action file-tabular-web /cgi-bin/ftw # (or /perl/ftw)
+  http://my.server/cgi-bin/ftw/path/to/my/app.ftw
+
+
+=head4 Implicit call of the script through mod_actions
+
+If your Apache has the C<mod_actions> module
+(most installations have it), then it
+is convenient to add the following directives
+in F<httpd.conf> :
+
+  Action file-tabular-web /cgi-bin/ftw 
   AddHandler file-tabular-web .ftw
 
-and restart the server.
-
 Now any file ending with ".ftw" in your htdocs tree will be treated as
-a File::Tabular::Web application. The handler will be called automatically
-and will read configuration instructions in the ".ftw" file.
-Therefore new applications can be installed without any further
-changes in the Apache configuration.
+a File::Tabular::Web application. In other words,
+instead of 
 
-Of course you can choose whatever name you like instead of "ftw" for file 
-suffixes and for the two-lines script; "ftw" was suggested because it 
-does not conflict with other common suffixes. 
-Similarly, the C<file-tabular-web> handler name can be arbitrarily changed.
+  http://my.server/cgi-bin/ftw/path/to/my/app.ftw
+
+you can use URL
+
+  http://my.server/path/to/my/app.ftw
+
+
+As already explained, C<.ftw> is just an arbitrary convention
+and can be replaced by any other suffix.
+Similarly, the C<file-tabular-web> handler name can be arbitrarily 
+replaced by another name.
+
+
+
+=head3 Configuration as a fastcgi script
+
+[probably works like cgi-bin; not tested yet]
+
+
 
 
 =head2 Setting up a particular application
 
 We'll take for example a simple people directory application.
-First create directory F<apache/htdocs/people>.
 
-Export your list of people in a flat text file named
-F<apache/htdocs/people/dir.txt>.
+
+=over
+
+=item *
+
+First create directory F<htdocs/people>.
+
+=item *
+
+Let's assume that you already have a list of people,
+in a spreadsheet or a database.
+Export that list into a flat text file named
+F<htdocs/people/dir.txt>.
 If you export from an Excel Spreadsheet, do NOT export as CSV format ; 
 choose "text (tab-separated)" instead. The datafile should contain
 one line per record, with a character like '|' or TAB as field 
 separator, and field names on the first line 
 (see L<File::Tabular|File::Tabular> for details).
 
+
+=item *
+
 Run the helper script
 
-  perl ftw_new_app.pl --fieldSep \\t apache/htdocs/people/dir.txt
+  perl ftw_new_app.pl --fieldSep \\t htdocs/people/dir.txt
 
 This will create in the same directory a configuration file C<dir.ftw>,
 and a collection of HTML templates C<dir_short.tt>, C<dir_long.tt>,
@@ -872,14 +1073,18 @@ other option are available, see
 
 for a list.
 
+=item *
+
 The URL C<http:://your.web.server/people/dir.ftw>
 is now available to access the application.
 You may first test the default layout, and then customize
 the templates to suit your needs.
 
+=back
+
 Note : initially all files are placed in the same directory, because
 it is simple and convenient; however, data and templates files
-are not really web resources and therefore should not theoretically
+are not really web resources and therefore theoretically should not 
 belong to the htdocs tree. If you want a more structured architecture,
 you may move these files to a different location, and specify
 within the configuration how to find them (see instructions below).
@@ -887,105 +1092,29 @@ within the configuration how to find them (see instructions below).
 
 =head1 WEB API
 
-=head2 Phases of a request
+=head2 Entry points
 
-Each request to this web application framework goes through the following
-phases :
+Various entry points into the application 
+(searching, editing, etc.) are
+chosen by single-letter arguments :
 
-=over
-
-=item B<initialisation phase> 
-
-this is where the configuration file is read 
-
-=item B<alias expansion> 
-
-CGI parameters are inspected and alias-expanded into
-specific handlers for the following phases
-
-=item B<data connection> 
-
-opening the data file
-
-=item B<data preparation phase> 
-
-building a result set, either from searching existing records,
-or by building a new record. A first check of user access
-rights may happen during this phase.
-
-=item B<post-check phase> 
-
-checking if the user has proper access rights to perform the
-desired operation on the result set (this may involve inspecting
-each record).
-
-=item B<data manipulation phase> 
-
-operations on the result set : deletions, updates, or just
-sorting and slicing the results after a search.
-
-=item B<display phase> 
-
-presenting the results, most commonly through an HTML template
-in TT2 format.
-
-=back
-
-
-Parameters to the Web request determine what will be performed
-a each of these phases. I<Core parameters> directly program 
-those phases; I<aliases> offer a shorter API where each
-alias is translated into a collection of core parameters.
-
-=head2 Core parameters
-
-=head3 PRE
-
-This specifies how to perform the data preparation phase. Usually this is
-mapped to methods L</search>, L</search_key> or L</empty_record>; but
-it is also possible to specifiy user-defined methods.
-
-=head3 PC
-
-This specifies how to perform the post-check phase (calling
-C<< $self->can_do($self->param('PC')) >> do decide
-whether or not the connected user has a right to do this operation). 
-
-=head3 SS
-
-Contains the search string.
-
-=head3 OP
-
-This specifies which operation will be performed
-during  data manipulation phase. Builtin operations
-are L</post_search>, L</delete> and L</update>.
-Of course it is also possible to specifiy user-defined methods.
-
-
-=head3 V
-
-Name of the view (i.e. template) that will be used to display
-the results.
-
-
-=head2 Aliases
 
 =head3 H
 
   http://myServer/some/app.ftw?H
 
-Displays the homepage of the application (through template C<home.tt>).
-Equivalent to 
+Displays the homepage of the application (through the C<home> view).
+This is the default entry point, i.e. equivalent to 
 
-  http://myServer/some/app.ftw?V=home
+  http://myServer/some/app.ftw
 
 =head3 S
 
   http://myServer/some/app.ftw?S=<criteria>
 
-Searches records matching the specified criteria, and displays them 
-through the C<short.tt> template. Here are some example of search criteria :
+Searches records matching the specified criteria, and displays 
+a short summary of each record (through the C<short> view).
+Here are some example of search criteria :
 
   word1 word2 word3                 # records containing these 3 words anywhere
   +word1 +word2 +word3              # idem
@@ -1002,21 +1131,45 @@ through the C<short.tt> template. Here are some example of search criteria :
 See L<Search::QueryParser> and L<File::Tabular> for 
 more details.
 
-Equivalent to 
+Additional parameters may control sorting and pagination. Ex:
 
-  http://myServer/some/app.ftw?PRE=search&SS=<criteria>&OP=post_search&V=short
+  ?S=word&orderBy=birthdate:-d.m.y,lastname:alpha&count=20&start=40
+
+=over
+
+=item count
+
+How many items to display on one page. Default is 50.
+
+=item start
+
+Index within the list of results, telling
+which is the first record to display (basis is 0).
+
+=item orderBy
+
+How to sort results. This may be one or several field
+names, possibly followed by a specification
+like C<:num> or C<:-alpha>.
+Precise syntax is documented in
+L<Hash::Type/cmp>.
+
+
+=item max
+
+Maximum number of records retrieved in a search (records
+beyond that number will be dropped).
+
+
+=back
 
 
 =head3 L
 
   http://myServer/some/app.ftw?L=<key>
 
-Finds the record with the given key and displays it through the
-C<long.tt> template.
-
-Equivalent to 
-
-  http://myServer/some/app.ftw?PRE=search_key&SS=<key>&V=long
+Finds the record with the given key and displays it
+in detail through the C<long> view.
 
 
 =head3 M
@@ -1024,12 +1177,8 @@ Equivalent to
   http://myServer/some/app.ftw?M=key
 
 Finds the record with the given key and displays it through the
-C<modif.tt> template (typically this will be a form
+C<modif> view (typically this view will be an HTML form
 with an action to call the update URL (C<?U=key>).
-
-Equivalent to 
-
-  http://myServer/some/app.ftw?PRE=search_key&SS=<key>&V=modif
 
 
 =head3 U
@@ -1040,11 +1189,7 @@ Finds the record with the given key
 and updates it with given field names and values.
 Of course these can be (and even should be) passed through
 POST method instead of GET.
-After update, displays an update message through the C<msg.tt> template.
-
-Equivalent to 
-
-  http://myServer/some/app.ftw?PRE=search_key&SS=<key>&OP=update
+After update, displays an update message through the C<msg> view.
 
 
 =head3 A
@@ -1052,12 +1197,8 @@ Equivalent to
   http://myServer/some/app.ftw?A
 
 Displays a form for creating a new record, through the 
-C<modif.tt> template. Fields may be filled by default values
+C<modif> view. Fields may be pre-filled by default values
 given in the configuration file.
-
-Equivalent to 
-
-  http://myServer/some/app.ftw?PRE=empty_record&PC=add&V=modif
 
 
 =head3 D
@@ -1065,28 +1206,27 @@ Equivalent to
   http://myServer/some/app.ftw?D=<key>
 
 Deletes record with the given key.
-After deletion, displays an update message through the C<msg.tt> template.
+After deletion, displays an update message through the C<msg> view.
 
-Equivalent to 
-
-  http://myServer/some/app.ftw?PRE=search_key&SS=<key>&OP=delete
 
 =head3 X
 
   http://myServer/some/app.ftw?X
 
-Display all records throught the C<download.tt> template.
+Display all records throught the C<download> view
+(mnemonic : eXtract)
 
-Equivalent to 
 
-  http://myServer/some/app.ftw?V=download
+=head2 Additional parameters
 
-=head2 Other URL possibilities
+=head3 V
 
-  http://myServer/some/app.ftw?PRE=search&SS=<criteria>&OP=delete
-  
-  http://myServer/some/app.ftw?PRE=search&SS=<criteria>&<field>=<val>&OP=update
+Name of the view (i.e. template) that will be used 
+instead of the default one.
+For example, assuming that the application
+has defined a C<print> view, we can call that view through
 
+  http://myServer/some/app.ftw?S=<criteria>&V=print
 
 
 
@@ -1095,13 +1235,29 @@ Equivalent to
 This section assumes that you already know how to write
 templates for the Template Toolkit (see L<Template>).
 
-The path for searching templates includes the application directory
-(where the configuration file resides) and the directory
-specified within the configuration file by parameters
-C<< [fixed]tmpl_dir >> or C<< [default]tmpl_dir >>, or, by
-default, C<Apache/lib/tmpl/tdb>.
+The path for searching templates includes
 
-Values passed to templates are as follows :
+=over
+
+=item *
+
+the application directory
+(where the configuration file resides) 
+
+=item *
+
+the directory specified within the configuration file by parameter
+C<< [template]dir >>
+
+=item *
+
+the default directory, C<< <server_root>/lib/tmpl/ftw >>
+
+=back
+
+
+
+=head2 Values passed to templates
 
 =over
 
@@ -1109,12 +1265,22 @@ Values passed to templates are as follows :
 
 handle to the C<File::Tabular::Web> object; from there you can access
 C<self.cfg> (configuration information), C<self.cgi> (CGI request object)
-and C<self.msg> (last message).
+and C<self.msg> (last message). You can also 
+call methods L</can_do> or L</param>, like for example
 
+  [% IF self.can_do('add') %]
+     <a href="?A">Add a new record</a>
+  [% END # IF %]
+
+
+or 
+
+  [% self.param('myFancyParam') %]
 
 =item C<found>
 
-structure containing the results. Fields within this structure are :
+structure containing the results of a search. 
+Fields within this structure are :
 
 =over
 
@@ -1145,69 +1311,36 @@ href link to the previous slice of results (if any)
 =back
 
 
-
 =back
 
 
 
-
-=head1 PUBLIC METHODS
-
-=head2 C<process>
-
-  File::Tabular::Web->process;
-
-This is the main entry point into the module. It creates a new request
-object, initializes it from information passed through the URL and
-through CGI parameters, and processes the request. In case of error,
-and HTML error page is generated.
-
-=head1 PRIVATE METHODS
-
-=head2 C<new>
-
-Creates a new C<File::Tabular::Web> object, which represents a web
-request. Reads PATH_INFO and CGI parameters, 
-and loads the configuration directives for that web application.
-
-=head2 C<initialize_request>
-
-Set up some general properties for the request, from information
-collected from configuration directives.
+=head2 Using relative URLS
 
 
-=head2 C<new_app>
+All pages generated by the application have the same URL;
+query parameters control which page will be displayed.
+Therefore all internal links can just start with a question
+mark : the browser will recognize that this is a relative
+link to the same URL, with a different query string.
+So within templates we can write simple links like
 
-Creates a Perl structure representing a ftw web application,
-after having read the configuration directives.
+  <a href="?H">Homepage</a>
+  <a href="?S=*">See all records</a>
+  <a href="?A">Add a new record</a>
+  [% FOREACH record IN found.records %]
+    <a href="?M=[% record.Id %]">Modify this record</a>
+  [% END # FOREACH  %]
 
-=head2 C<read_config>
+Similarly, HTML forms do not need an ACTION attribute,
+since by default they will submit to the same URL.
+So you can simply write something like
 
-Set up L<AppConfig|AppConfig> and read the configuration file.
-
-=head2 C<find_operation>
-
-Requests are mapped to sequences of "operations". An operation 
-corresponds either to an internal method, or to a loaded function.
-So C<find_operation> finds out which.
-
-=head2 C<dispatch_request>
-
-Decides which sequence of operations should be called, and call them.
-
-=head2 C<expand_aliases>
-
-An "alias" is a single-letter CGI argument that acts as a shortcut
-for a sequence of operations. This method inspects CGI arguments
-and expands the first alias found.
-
-=head2 C<open_data>
-
-Retrieves the name of the datafile, decides whether it
-should be opened for readonly or for update, and 
-creates a corresponding L<File::Tabular|File::Tabular> object. 
-The datafile may be cached in memory if directive C<useFileCache> is
-activated.
+  <form method="post">
+   <input type="hidden" name="U" value="[% record.Id %]">
+   First Name <input name="firstname">
+   Last Name  <input name="lasttname">
+  </form>
 
 
 =head1 CONFIGURATION FILE
@@ -1229,114 +1362,144 @@ the viewing templates through C<< [% self.cfg.<param> %] >>;
 this is useful for example for setting a title or other
 values that will be common to all templates.
 
-=over
-
-=item useFileCache
-
-If true, the whole datafile will be slurped into memory and reused
-across requests.
+The global section may also contain some
+options to L<File::Tabular/new> :
+C<preMatch>, C<postMatch>, C<avoidMatchKey>, C<fieldSep>, C<recordSep>.
 
 
 
-=back
 
 =head2 [fixed] / [default]
 
-The B<fixed> and B<default> sections contain some parameters
-that control the behaviour of the application ; it is your choice
-to either put them in the B<fixed> section (values will never change)
-or to put them in the B<default> section (default values can be 
-overriden by CGI parameters).
+The C<fixed> and C<default> sections 
+simulate parameters to the request.
+Specifications in the C<fixed> section are stronger
+than HTTP parameters; specifications in the 
+C<default> section are weaker : the L<param|param>
+method for the application will first look in the C<fixed> section, 
+then in the HTTP request, and finally in the C<default> section.
+So for example with 
 
-The parameters are :
+  [fixed]
+  count=50
+  [default]
+  orderBy=lastname
+
+a request like
+
+  ?S=*&count=20
+
+will be treated as
+
+  ?S=*&count=50&orderBy=lastname
+
+
+Relevant parameters to put in these sections
+are for example the 
+C<count>, C<orderBy>, etc. parameters described
+in section L</S>.
+
+=head2 [application]
+
+This section allows you to override some builtin
+defaults associated with the application.
 
 =over
 
-=item C<< max >>
+=item C<< dir=/some/directory >>
 
-Maximum number of records handled in searches (records above that number
-will be dropped).
+Directory where application files reside.
+By default : same directory as the configuration file.
 
-=item C<< count >>
+=item C<< name=some_name >>
 
-Size of a result slice (number of records displayed at a time
-when presenting results of a search).
+Name of the application (will be used for example
+as prefix to find template files).
+Single-level name, no pathnames allowed.
 
-=item C<< sortBy >>
+=item C<< data=some_name >>
 
-Sort criteria, like for example C<< someField: -num, otherField: alpha >>.
-See L<File::Tabular/search> for the exact syntax of 
-sort specifications.
+Name of the tabular file containing the data.
+Single-level name, must be in the application directory.
+By default: application name with the C<.txt> suffix appended.
 
+=item C<< class=My::File::Tabular::Web::Subclass >>
+
+Will dynamically load the specified module and use it as 
+class for objects of this application. The specified module
+must be a subclass of C<File::Tabular::Web>.
+
+=item C<< useFileCache=1 >>
+
+If true, the whole datafile will be slurped into memory and reused
+across requests (except update requests).
 
 =back
+
 
 
 =head2 [permissions]
 
-The B<permissions> section specifies access control rights for the
-applications. For each entry listed below, you can give a list of users
-[or groups], separated by commas or spaces : these are the "permanent"
-rights, valid for all data records. In addition, rights can be granted
+This  section specifies permissions to perform operations
+within the application. Of course we need
+Apache to be configured to do some kind of authentification,
+so that the application receives a user name 
+through the C<REMOTE_USER> environment variable;
+many authentification modules are available, 
+see C<Apache/manual/howto/auth.html>.
+Otherwise the default user name received
+by the application is "Anonymous".
+
+Apache may also be configured to do some kind of authorisation checking,
+but this will control access to the application as a whole, whereas
+here we configure fine-grained permissions for various operations.
+
+Builtin permission names are : 
+C<search>,
+C<read>,
+C<add>,
+C<delete>,
+C<modif>,
+and C<download>.
+Each name also has a I<negative> counterpart, i.e.
+C<no_search>,
+C<no_read>, etc.
+
+For each of those permission names, the configuration can
+give a list of user names
+separated by commas or spaces : the current user name will be 
+compared to this list. A permission may also specify 'C<*>', which
+means 'everybody' : this is the default for
+permissions C<read>, C<search> and C<download>.
+There is no builtin notion of "user groups", but 
+you can introduce such a notion by writing a subclass which overrides the
+L</user_match> method.
+
+Permissions may also be granted or denied
 on a per-record basis : writing C<< $fieldname >> (starting
 with a literal dollar sign) means that 
 users can access records in which the content of  C<< fieldname >>
-matches their username. 
+matches their username. Usually this is associated 
+with an I<automatic user field> (see below), so that
+the user who created a new record can later modify it.
 
-Here are the possible entries for positive rights :
+Example :
 
-=over
+  [permissions]
+   read   = * # the default, could have been omitted
+   search = * # idem
+   add    = andy bill 
+   modif  = $last_author # username must match content of field 'last_author'
+   delete = $last_author
 
-=item C<< add >>
-
-Right to add new records.
-
-=item C<< delete >>
-
-Right to delete records.
-
-=item C<< modif >>
-
-Right to modify records.
-
-=item C<< search >>
-
-Right to search records.
-
-=back
-
-Each of the entries above also has a corresponding entry for negative
-rights, written C<< no_add >>, C<< no_delete >>, etc.; so that you can
-selectively prevent some users to perform specific actions.
 
 
 =head2 [fields]
 
+The C<fields> section specifies some specific
+information about fields in the tabular file.
+
 =over
-
-=item C<< indexedDocNum <field> >>
-
-Name of the field which holds the I<document Number>.
-
-=item C<< indexedDocContent = sub {my ($self, $record) = @_; ...; return $buf;} >>
-
-Handler to get the textual content from an attached indexed document.
-The handler should return a buffer with the textual representation of 
-the document content.
-
-=item C<< indexedDocFile <field> >>
-
-Name of the field which holds the I<document filename>.
-
-=item C<< upload <field> >>
-
-Just declares C<< field >> to be an upload field.
-
-=item C<< upload <field> = sub {my ($self, $record, $upldClientName) = @_; ...; return $newname;} >>
-
-Declares C<< field >> to be an upload field, and supplies a hook to choose
-the server-side name of the uploaded file. The supplied C<< sub >> should 
-return a pathname.
 
 =item C<< time <field> = <format>  >>
 
@@ -1365,11 +1528,19 @@ Default values for some fields ; will be inserted into new records.
 
 =back
 
+
+Subclasses may add more entries in this section
+(for example for specifying fields holding names
+of attached documents).
+
+
+
 =head2 [template]
 
 This section specifies where to find templates for various views.
 The specified locations will be looked for either in the
-current directory, or in C<< <apache_dir>/lib/tmpl/app >>.
+application directory, or in C<< <apache_dir>/lib/tmpl/ftw >>.
+
 
 =over
 
@@ -1400,99 +1571,165 @@ Homepage for the application.
 =back
 
 
+Defaults for these templates are
+C<< <application_name>_short.tt >>, 
+C<< <application_name>_long.tt >>, etc.
 
-=head2 [handlers]
 
-In this section, you can insert your own code for various phases
-of the request cycle. This code will be B<eval>'d and can
-then be called in the URLs.
+=head1 METHODS
+
+The only I<public> method is the L</handler> method,
+to be called from mod_perl or from a cgi-bin script.
+
+All other methods are internal to the application,
+i.e. not meant to be called from external code.
+They are documented here in case you would want 
+to subclass the package. If you don't need
+subclassing, you can B<ignore this whole section>.
+
+Methods starting with an underscore are meant to
+be I<private>, i.e. should not be redefined in subclasses.
+All other methods are I<protected>.
+
+=head2 Entry point
+
+=head3 handler
+
+  File::Tabular::Web->handler;
+
+This is the main entry point into the module. It creates a new request
+object, initializes it from information passed through the URL and
+through CGI parameters, processes the request, and generates
+the answer. In case of error, the page contains an error message.
+
+
+=head2 Methods for creating / initializing "application" hashrefs
+
+=head3 _app_new
+
+Reads the configuration file for a given application
+and creates a hashref storing the information.
+The hashref is put in a global cache of all applications
+loaded so far.
+
+This method should not be overridden in subclasses;
+if you need specific code to be executed, use
+the L</app_initialize> method.
+
+=head3 _app_read_config
+
+Glueing code to the L<AppConfig> module.
+
+=head3 app_initializea
+
+Initializes the application hashref. In particular,
+it creates the L<Template> object, with appropriate
+settings to specify where to look for templates.
+
+If you override this method in subclasses, 
+you should probably call C<SUPER::app_initialize>.
+
+=head3 app_tmpl_default_dir
+
+Returns the default directory containing templates.
+The default is C<< <server_root>/lib/tmpl/ftw >>.
+
+=head3 app_tmpl_filters
+
+Returns a hashref of filters to be passed to 
+the Template object (see L<Template::Filters>).
+Empty by default.
+
+=head3 app_phases_definition
+
+As explained above in section L</"WEB API">, various
+entry points into the application are chosen by single-letter
+arguments; here this method returns a table that specifies what happens
+for each of them. 
+
+A letter in the table is associated to a hashref,
+with the following keys :
 
 =over
 
-=item C<< prepare <handlerName> = sub {my $self=shift; ...} >>
+=item pre
 
-Registers a handler for the I<data preparation> phase.
-The handler can then be called by passing
-a B<PRE> parameter with value B<handlerName>.
+name of method to be executed in the "data preparation phase"
 
+=item op
 
-=item C<< update before = sub {my $self=shift; my $r=shift; ...} >>
+name of method to be executed in the "data manipulation phase"
 
-Registers a handler that will be called automatically
-before updating a record. The record is passed as second argument.
+=item view
 
+name of view for displaying the results
 
 =back
 
-=head2 [filters]
+
+=head2 Methods for instance creation / initialization
 
 
-Specifies filters for the Template Toolkit.
-Each filter takes the form
+=head3 _new
 
-  filter_name = function_name, dynamic_flag
+Creates a new object, which represents an HTTP request
+to the application. The class for the created object is 
+generally C<File::Tabular::Web>, unless specified otherwise
+in the the configuration file (see the C<class> entry
+in section L</"CONFIGURATION FILE">).
 
-where C<filter_name> is the name seen within templates, 
-C<function_name> is the Perl function implementing the filter,
-and C<dynamic_flag> is either 0 or 1 depending on whether the filter
-is static or dynamic (see L<Template::Filters>).
+The C<_new> method cannot be redefined in subclasses; if you need
+custom code to be executed, use L</initialize> or L</app_initialize>
+(both are invoked from C<_new>).
 
-=head2 [perl]
+=head3 initialize
 
-The C<perl> provides several ways to dynamically load code into the
-current interpreter. If running under mod_perl, be sure to know what
-you are doing, since the loaded code might interfere with code already
-loaded into the server. Also beware that packages or functions loaded
-in this way will not be recognized properly by 
-L<Apache::Reload|Apache::Reload>, so you will need to fully restart 
-Apache in case of any change in the code.
-
-=over
-
-=item C<< class My::File::Tabular::Web::Subclass >>
-
-Will dynamically load the specified module and use it as 
-class for the current C<app> object.
+Code to initialize the object. The default behaviour is
+to setup C<max>, C<count> and C<orderBy> within the 
+object hash.
 
 
-=item C<< use Some::Module qw/import list/ >>
+=head3 _setup_phases
 
-Will dynamically load the specified module. An import list may
-be specified, i.e. C<< use Some::Module qw/foo :bar/ >>.
+Reads the phases definition table and decides about what to 
+do in the next phases.
 
+=head3 _open_data
 
-=item C<< require some/file.pl >>
+Retrieves the name of the datafile, decides whether it
+should be opened for readonly or for update, and 
+creates a corresponding L<File::Tabular|File::Tabular> object. 
+The datafile may be cached in memory if directive C<useFileCache> is
+activated.
 
+=head3 _cached_content
 
-=item C<< eval "some code" >>
-
-
-=back
-
-
-
-
-=head1 PUBLIC METHODS
-
-=over
+Implementation of the memory cache;
+checks the modification time of the file
+to detect changes and invalidate the cache.
 
 
-=item C<< process([$cgi]) >>
+=head2 Methods that can be called from templates
 
-This is the main public method. It creates a 
-C<File::Tabular::Web> instance and processes the request
-specified in CGI parameters, as explained below.
+=head3 param
 
-The optional C<$cgi> argument should be an instance of L<CGI>;
-if you supply none, it will be created automatically.
+  [% self.param($param_name) %]
 
+Returns the value that was specified under C<$param_name> in the
+HTTP request, or in the configuration file (see the 
+description of C<< [fixed]/[default] >> sections).
 
-=item B<< can_do($action, [$record]) >>
+The return value is always a scalar; in case of multiple
+HTTP values, they are joined with a space. Initial and
+trailing spaces are automatically removed.
 
-This method is meant to be called from within templates; it
-tells whether the current user has permission to do 
+=head3 can_do
+
+  [% self.can_do($action, [$record]) %]
+
+Tells whether the current user has permission to do 
 C<$action> (which might be 'edit', 'delete', etc.).
-See explanations below about how permissions are specified
+See explanations above about how permissions are specified
 in the initialisation file.
 Sometimes permissions are setup in a record-specific way
 (for example one data field may contain the names of 
@@ -1500,95 +1737,151 @@ authorized users); the second optional argument
 is meant for those cases, so that C<can_do()> can inspect the current
 data record.
 
-=item B<< url([$which]) >>
+=head2 Request handling : general methods
 
-This method is meant to be called from within templates.
-It returns the url to the current web application.
-The optional argument C<$which> specifies a particular
-entry point into the application :
+=head3 _dispatch_request
 
-=over
+Executes the various phases of request handling
 
-=item add
+=head3 _display
 
-create a new record
+Finds the template corresponding to the view name,
+gathers its output, and prints it together with 
+some HTTP headers.
 
-=item all
+=head2 Request handling : search methods
 
-display all records
+=head3 search_key
 
-=item home
+Search a record with a specific key.
+Puts the result into C<< $self->{result} >>.
 
-display homepage
+=head3 search
 
-=item download
+Search records matching given criteria
+(see L<File::Tabular|File::Tabular> for details).
+Puts results into C<< $self->{result} >>.
 
-display "download page"
+=head3 before_search
 
-=back
+Initializes C<< $self->{search_string} >>.
+Overridden in subclasses for more specific
+searching (like for example adding fulltext search
+into attached documents).
 
-=back
+=head3 sort_and_slice
+
+Choose a slice within the result set, according
+to pagination parameters C<count> and C<start>.
+
+=head3 _url_for_next_slice
+
+Returns an URL to the next or previous slice,
+using L</"params_for_next_slice">.
+
+=head3 params_for_next_slice
+
+Returns an array of strings C<"param=value"> that will
+be inserted into the URL for next or previous slice.
+
+=head3 words_queried
+
+List of words found in the query string
+(to be used for example for highlighting those words
+in the display).
+
+=head2 Update Methods
+
+=head3 empty_record
+
+Generates an empty record (preparation for adding
+a new record). Fields are filled with default values
+specified in the configuration file.
+
+=head3 prepare_update
+
+Fetches the record to update, or builds an empty
+record, according to the argument to the update request.
+
+=head3 update
+
+Checks for permission and then performs the update.
+Most probably you don't want to override this
+method, but rather C<before_update> or C<after_update>.
+
+=head3 before_update
+
+Copies values from HTTP parameters into the record,
+and automatically fills the user name or current time/date
+in appropriate fields.
+
+=head3 after_update
+
+Hook for any code to perform after an update (useful
+for example for attached documents).
+
+=head3 rollback_update
+
+Hook for any code to roll back whatever was performed
+in C<before_update>, in case the update failed (useful
+for example for attached documents).
+
+=head2 Delete Methods
+
+=head3 delete
+
+Checks for permission and then performs the delete.
+Most probably you don't want to override this
+method, but rather C<before_delete> or C<after_delete>.
+
+=head3 before_delete
+
+Hook for any code to perform before a delete.
+
+=head3 after_delete
+
+Hook for any code to perform aftere a delete.
+
+=head2 Miscellaneous methods
+
+=head3 prepare_download
+
+Checks for permission to download the whole dataset.
+
+=head3 print_help
+
+Prints help. Not implemented yet.
+
+=head3 user_match
+
+  $self->user_match($access_control_list)
+
+Returns true if the current user (as stored
+in C<<  $self->{user} >> "matches" the access 
+control list (given as an argument string).
+
+The meaning of "matches" may be redefined in subclasses;
+the default implementation just performs a regex 
+case-insensitive search within the list for a complete 
+word equal to the username.
+
+Override in subclasses if you need other authorization
+schemes (like for example dealing with groups).
+
+=head1 AUTHOR
+
+Laurent Dami, C<< <laurent.d...@justice.ge.ch> >>
+
+=head1 COPYRIGHT & LICENSE
+
+Copyright 2007 Laurent Dami, all rights reserved.
+
+This program is free software; you can redistribute it and/or modify it
+under the same terms as Perl itself.
 
 
-=head1 PRIVATE METHODS
-
-Below are methods for internal use within the class. 
-Normally there is no reason to call them directly ; 
-they are documented just in case you should ever 
-redefine them in subclasses.
-
-=over
-
-=item C<< new([$cgi]) >>
-
-Creates a new instance of C<< File::Tabular::CGI >>, associates it 
-with a C<< CGI >> object (either newly created or received as optional
-argument) and with a C<< Template >> object, 
-and reads the configuration file.
-
-=item C<< read_config() >>
-
-Reads configuration file in C<< Appconfig >> format.
-Complains from C<< Appconfig >> about undefined variables
-are discarded; other errors are propagated to the user.
-
-=cut
 
 
-
-
-
-
-
-
-
-
-
-=back
-
-=head1 TODO
-
-  - can_do : deal with groups GE-JUSTICE
-  - print doc if no path_info
-  - path to global templates : option
-  - find better security model for action 'add'
-  - doc : show example of access to fileTabular->mtime->{hour}
-  - server-side record validation using "F::T where syntax" (f1 > val, etc.)
-    or using code hook
-  - cache cfg if running under mod_perl Registry
-  - generalize empty_record (design config params)
-  - template for $self->delete (either default or user-supplied)
-  - support for path given without PATH_INFO : still useful ??
-      context : 1) mod_perl ; 2) Apache handler (cgi-bin) ; 3) cgi-bin/app/path
-  - config property for allowing/disallow multiple Delete or multiple Update
-  - view abstraction for direct display of attached doc 
-  - update : how to handle name conflicts : field names / builtin 
-    names (sortBy, score, excerpts, etc.)
-  - better abstraction for PRE handler according to U=.. (build/search)
-  - remove direct link to GE::Justice::AnyDoc2Txt, need abstracted converter
-  - more clever generation of wordsQueried in search
-  - remove direct call to $upld_field/...
-  - enqueue : remove GE::Justice dependencies (FichierWord, etc.)
 
 
 
