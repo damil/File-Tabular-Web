@@ -14,6 +14,7 @@ my $builder = Module::Build->new(
         'AppConfig'           => 0,
         'POSIX'               => 0,
         'File::Basename'      => 0,
+        'File::Path'          => 0,
         'List::Util'          => 0,
         'List::MoreUtils'     => 0,
         'File::Tabular'       => 0,

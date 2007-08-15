@@ -5,9 +5,7 @@ TODO
  - check good working of orderBy
  - system to control headers
  - automatically set expire header if modify is enabled
- - support both "modif" and "modify"
  - create logger in new() + use Time::HiRes
- - doc : show example of access to fileTabular->mtime->{hour}
  - server-side record validation using "F::T where syntax" (f1 > val, etc.)
     or using code hook
  - template for $self->delete (either default or user-supplied)
@@ -15,6 +13,9 @@ TODO
  - check config file (exists, non-empty, valid)
  - options qw/preMatch postMatch avoidMatchKey fieldSep recordSep/
     should be in a specific section
+ - make compatibility with modperl1
+ - dynamic menus presenting all possible values (like Excel automatic filter)
+
 
 TO CHECK WHEN UPGRADING
 
@@ -22,10 +23,13 @@ TO CHECK WHEN UPGRADING
  - 'add' permission without 'modif' 
   - Minutes, links to getDecis, links F=...
   - Minutes , specify class
+  - force views in Minutes (short, edit, etc.)
   - remove HTTP header from templates
   - using groups in permissions
   - remove calls to [% self.url('foobar') %]
   - replace [fixed]tmpl_dir by [template]dir
+
+  - config : autoNum and not autonum
 
 =end comment
 
@@ -52,6 +56,7 @@ use AppConfig       qw/:argcount/;
 use File::Tabular;
 use Search::QueryParser;
 
+
 my %app_cache;
 my %datafile_cache;      #  persistent data private to _cached_content
 
@@ -68,7 +73,7 @@ my %datafile_cache;      #  persistent data private to _cached_content
 #----------------------------------------------------------------------
 sub handler : method { 
 #----------------------------------------------------------------------
-  my $class = shift;
+  my $class = shift; # if under modperl, $_[0] will be the Apache2::RequestRec
   my $self;
   eval { $self = $class->_new(@_);  $self->_dispatch_request; 1;}
     or do {
@@ -78,9 +83,15 @@ sub handler : method {
 
       # try displaying through msg view..
       eval {$self->_display}
-        # .. or else fallback with simple HTML page
-        or print "Content-type: text/html\n\n\n"
-               . "<html>$self->{msg}</html>\n";
+        or do { # .. or else fallback with simple HTML page
+          my $content = "<html>$self->{msg}</html>\n";
+          if (ref($_[0]) =~ /^Apache2/) { # if under mod_perl
+            $_[0]->print($content)
+          }
+          else {
+            print "Content-type: text/html\n\n$content";
+          }
+        };
     };
 
   return 0; # Apache2::Const::OK;
@@ -98,11 +109,12 @@ sub _app_new { # creates a new application hashref (not an object)
   my $app = {};
 
   # application name and directory : defaults from the name of config file
-  @{$app}{qw(appname dir suffix)} = fileparse($config_file, qr/\.[^.]*$/);
+  @{$app}{qw(name dir suffix)} = fileparse($config_file, qr/\.[^.]*$/);
 
   # read the config file
   $app->{cfg} = $class->_app_read_config($config_file);
-  my $tmp;
+
+  my $tmp; # predeclare $tmp so that it can be used in "and" clauses
 
   # application directory
   $tmp = $app->{cfg}->get('application_dir')  and do {
@@ -111,15 +123,15 @@ sub _app_new { # creates a new application hashref (not an object)
   };
 
   # application name
-  $tmp = $app->{cfg}->get('application_name') and $app->{appname} = $tmp;
+  $tmp = $app->{cfg}->get('application_name') and $app->{name} = $tmp;
 
   # data file
   $tmp = $app->{cfg}->get('application_data');
-  $app->{data_file} = $app->{dir} . ($tmp || "$app->{appname}.txt");
+  $app->{data_file} = $app->{dir} . ($tmp || "$app->{name}.txt");
 
   # application class
   $tmp = $app->{cfg}->get('application_class') and do {
-    eval "use $tmp" or die $@; # dynamically load the requested code
+    eval "require $tmp" or die $@; # dynamically load the requested code
     $tmp->isa($class) or die "$tmp is not a $class";
     $app->{class} = $tmp;
   };
@@ -153,10 +165,8 @@ sub _app_read_config { # read configuration file through Appconfig
   });
 
   # define specific options for some variables
-  # NOTE : fields_upload should really belong to FTW::Attachments, 
-  #        but cannot be put there because that class cannot be known
-  #        before we have read the config file !
-  foreach my $hash_var (qw/fields_upload fields_default fields_time/) {
+  # NOTE: fields_upload is not used here, but by F::T::Attachments
+  foreach my $hash_var (qw/fields_default fields_time fields_upload/) {
     $cfg->define($hash_var => {ARGCOUNT => ARGCOUNT_HASH});
   }
   $cfg->define(fieldSep  => {DEFAULT => "|"});
@@ -198,12 +208,7 @@ sub app_tmpl_default_dir { # default; override in subclasses
 #----------------------------------------------------------------------
   my ($self) = @_;
 
-  # guess where the server root is
-  my $server_root = 
-    $self->{modperl} ? Apache2::ServerUtil::server_root() 
-                     : ($ENV{DOCUMENT_ROOT} =~ m[(.*)[/\\]])[0];
-
-  return "$server_root/lib/tmpl/ftw";
+  return "$self->{server_root}/lib/tmpl/ftw";
 }
 
 
@@ -225,6 +230,7 @@ sub app_phases_definitions {
 
 # PHASES DEFINITIONS TABLE : each single letter is expanded into 
 # optional methods for data preparation, data operation, and view.
+# It is also possible to differentiate between GET and POST requests.
   return (
 
     A => # prepare a new record for adding
@@ -239,14 +245,12 @@ sub app_phases_definitions {
     L => # display "long" view of one single record
       {pre => 'search_key',                             view => 'long'    },
 
-    M => # display modify view (form for update)
-      {pre => 'search_key',                             view => 'modif'   },
+    M => # modif: GET displays the form, POST performs the update
+      {GET  => {pre => 'search_key',                    view => 'modif'},
+       POST => {pre => 'prepare_update', op => 'update'                }  },
 
     S => # search and display "short" view
       {pre => 'search',         op => 'sort_and_slice', view => 'short'   },
-
-    U => # update
-      {pre => 'prepare_update', op => 'update'                            },
 
     X => # display all records in "download view" (mnemonic: eXtract)
       {pre => 'prepare_download',                       view => 'download'},
@@ -263,31 +267,46 @@ sub app_phases_definitions {
 #----------------------------------------------------------------------
 sub _new { # creates a new instance of a request object
 #----------------------------------------------------------------------
-  my ($class, $modperl) = @_;
-
+  my $class = shift; # if under modperl, $_[0] will be the Apache2::RequestRec
   my $self = {};
+  my $path;
 
   # if under mod_perl, we got an Apache2::RequestRec as second arg
-  if (ref($modperl) =~ /^Apache/) {
-    $self->{modperl} = $modperl;
+  if (ref($_[0]) =~ /^Apache2/) {
+    $self->{modperl}     = $_[0];
+    $self->{server_root} = Apache2::ServerUtil::server_root();
+    $self->{user}        = $self->{modperl}->user || "Anonymous";
+    $self->{url}         = $self->{modperl}->uri;
+    $self->{method}      = $self->{modperl}->method;
+    $path                = $self->{modperl}->filename;
+
+    require Apache2::Request;
+    $self->{apache2_request} = Apache2::Request->new($self->{modperl});
+  }
+  else { # create the CGI instance
+    $self->{cgi}         = CGI->new(@_);
+    # server_root: no definite info. We guess it is one level above doc_root
+    $self->{server_root} = ($ENV{DOCUMENT_ROOT} =~ m[(.*)[/\\]])[0];
+    $self->{user}        = $self->{cgi}->remote_user || "Anonymous";
+    $self->{url}         = $self->{cgi}->url(-path => 1);
+    $self->{method}      = $self->{cgi}->request_method;
+    $path                = $self->{cgi}->path_translated;
   }
 
-  # create the CGI instance, and get various info from it
-  $self->{cgi}  = CGI->new($modperl);
-  $self->{user} = $self->{cgi}->remote_user || "Anonymous";
-  $self->{url}  = $self->{cgi}->url(-path => 1);
-
-  # get path of config file, then find or create the app structure
-  my $path = $self->{modperl}
-             ? $self->{modperl}->filename
-             : $self->{cgi}->path_translated;
-  my $must_initialize_app = not $app_cache{$path};
-  $self->{app} = $app_cache{$path} ||= $class->_app_new($path);
+  # get file last modification time
+  my $mtime = (stat $path)[9] or die "couldn't stat $path";
+  my $cache_entry = $app_cache{$path};
+  my $app_initialized = $cache_entry && $cache_entry->{mtime} == $mtime;
+  if (not $app_initialized) {
+    $app_cache{$path} = {mtime   => $mtime, 
+                         content => $class->_app_new($path)};
+  }
+  $self->{app} = $app_cache{$path}->{content};
   $self->{cfg} = $self->{app}{cfg}; # shortcut
 
   # bless the request obj into the application class, initialize and return
   bless $self, $self->{app}{class};
-  $self->app_initialize if $must_initialize_app;
+  $app_initialized or $self->app_initialize; # must happen after "bless"
   $self->initialize;
   return $self;
 }
@@ -317,15 +336,14 @@ sub _setup_phases { # decide about next phases
   my %request_phases = $self->app_phases_definitions;
 
   # find out which single-letter was requested
-  my ($letter, @others) = grep {defined $self->param($_)} keys %request_phases;
-  if (@others) {
-    my $in_conflict = join " / ", $letter, @others;
-    die "conflict in request: $in_conflict";
-  }
-  $letter ||= 'H'; # by default : homepage
+  my @letters = grep {defined $self->param($_)} keys %request_phases;
+  @letters <= 1
+    or die "conflict in request: " . join(" / ", @letters);
+  my $letter = $letters[0] || "H"; # by default : homepage
 
   # setup info in $self according to the chosen letter
-  my $phases = $request_phases{$letter};
+  my $entry     = $request_phases{$letter};
+  my $phases    = $entry->{$self->{method}} || $entry;
   $self->{view} = $self->param('V') || $phases->{view};
   $self->{pre}  = $phases->{pre};
   $self->{op}   = $phases->{op};
@@ -335,64 +353,48 @@ sub _setup_phases { # decide about next phases
 
 
 #----------------------------------------------------------------------
-sub _open_data { # open File::Tabular object on data file
+sub open_data { # open File::Tabular object on data file
 #----------------------------------------------------------------------
   my $self = shift;
 
-  my $file_name      = $self->{app}{data_file};
-  my $use_file_cache = $self->{cfg}->get('application_useFileCache');
+  # parameters for opening the file
+  my $open_src = $self->{app}{data_file};
+  my $mtime    = (stat $open_src)[9] or die "couldn't stat $open_src";
 
-  # choose how to open the file
-  my @openParams = 
-    ($self->{op} =~ /delete|update/)        ? ("+< $file_name") : # open RWrite
-    (not $use_file_cache)                   ? ($file_name)      : # open ROnly
-       do { my $cache_entry = $self->_cached_content($file_name);
-	    ('<', $cache_entry->{content}); #  open from the memory copy
-	  };
+  # text version of modified time for templates
+  if (my $fmt = $self->{cfg}->get('application_mtime')) {
+    $self->{mtime} = strftime($fmt, localtime($mtime));
+  }
+
+  my $open_mode = ($self->{op} =~ /delete|update/) ? "+<" : "<";
+
+  # application option : use in-memory cache only for read operations
+  if ($self->{cfg}->get('application_useFileCache') 
+        && $open_mode eq '<') { 
+    my $cache_entry = $datafile_cache{$open_src};
+    unless ($cache_entry && $cache_entry->{mtime} == $mtime) {
+      open my $fh, $open_src or die "open $open_src : $^E";
+      local $/ = undef;
+      my $content = <$fh>;	# slurps the whole file into memory
+      close $fh;
+      $datafile_cache{$open_src} = {mtime   => $mtime, 
+                                    content => \$content };
+    }
+    $open_src = $cache_entry->{content}; # ref to in-memory content
+  }
 
   # set up options for creating File::Tabular object
   my %options;
   foreach (qw/preMatch postMatch avoidMatchKey fieldSep recordSep/) {
     $options{$_} = $self->{cfg}->get($_);
   }
-
   $options{autoNumField} = $self->{cfg}->get('fields_autoNum');
   my $jFile = $self->{cfg}->get('journal');
   $options{journal} = "$self->{app}{dir}$jFile" if $jFile;
 
   # create File::Tabular object
-  $self->{data} = new File::Tabular(@openParams, \%options);
+  $self->{data} = new File::Tabular($open_mode, $open_src, \%options);
 }
-
-
-#----------------------------------------------------------------------
-sub _cached_content { # if cfg->get('useFileCache'), keep datafile in memory
-#----------------------------------------------------------------------
-  my ($self, $file_name) = @_;
-
-  # get file last modification time
-  my $mtime = (stat $file_name)[9] or die "couldn't stat $file_name";
-
-  # delete cache entry if too old
-  if ($datafile_cache{$file_name} &&  
-        $mtime > $datafile_cache{$file_name}->{mtime}) {
-    delete $datafile_cache{$file_name};
-  }
-
-  # create cache entry if necessary
-  $datafile_cache{$file_name} ||= do {
-    open my $fh, $file_name or die "open $file_name : $^E";
-    local $/ = undef;
-    my $content = <$fh>;	# slurps the whole file into memory
-    close $fh;
-    { mtime => $mtime, content => $content }; # return val from do{} block
-  };
-
-  return $datafile_cache{$file_name};
-}
-
-
-
 
 
 #======================================================================
@@ -410,8 +412,8 @@ sub param { # always returns a scalar value
   return $val if $val;
 
   # then check in parameters to this request
-  my @vals = $self->{modperl} ? $self->{modperl}->param($p)
-                              : $self->{cgi}->param($p);
+  my $param_src = $self->{apache2_request} || $self->{cgi};
+  my @vals = $param_src->param($p);
   if (@vals) {
     $val = join(' ', @vals);    # join multiple values
     $val =~ s/^\s+//;           # remove initial spaces
@@ -463,7 +465,7 @@ sub _dispatch_request { # go through phases and choose appropriate handling
   my $letter_arg = $self->_setup_phases;
 
   # data access
-  $self->_open_data;
+  $self->open_data;
 
   # data preparation : invoke method if any, passing the arg saved above
   $method = $self->{pre} and $self->$method($letter_arg);
@@ -487,7 +489,7 @@ sub _display { # display results in the requested view
 
   # name of the template for this view
   my $tmpl_name = $self->{cfg}->get("template_$view")
-               || "$self->{app}{appname}_$view.tt";
+               || "$self->{app}{name}_$view.tt";
 
   # call that template
   my $body;
@@ -501,6 +503,7 @@ sub _display { # display results in the requested view
   if ($self->{modperl}) {
     $self->{modperl}->set_last_modified($modified);
     $self->{modperl}->set_content_length($length);
+    $self->{modperl}->headers_out->add(Expires => 0);
     $self->{modperl}->print($body);
   }
   else {
@@ -508,6 +511,7 @@ sub _display { # display results in the requested view
     print "Content-type: text/html$CRLF"
         . "Content-length: $length$CRLF"
         . "Last-modified: $modified$CRLF"
+        . "Expires: 0$CRLF"
         . "$CRLF"
         . $body;
   }
@@ -715,7 +719,8 @@ sub empty_record { # to be displayed in "modif" view (when adding)
 sub prepare_update { 
 #----------------------------------------------------------------------
   my ($self, $update_arg) = @_;
-  if ($update_arg =~ /$self->{data}{autoNumChar}/) { # adding new record
+  my $autonum_char = $self->{data}{autoNumChar};
+  if ($update_arg =~ /$autonum_char/) { # adding new record
     $self->empty_record;
   }
   else {
@@ -755,20 +760,20 @@ sub update {
   my @headers = $self->{data}->headers;
   my $data_line = join("|", @{$record}{@headers});
   my $id = $record->{$headers[0]};
-  $self->{msg} = "Updated:<br><br>"
-               . "<a href='?S=K_E_Y:$id'>Record $id</a>: $data_line<br>";
+  $self->{msg} .= "<br>Updated:<br>"
+               .  "<a href='?S=K_E_Y:$id'>Record $id</a>: $data_line<br>";
 
   # do the update
   my $to_delete = $is_adding ? 0         # no previous line to delete
                              : 1;        # replace previous line
   eval {$self->{data}->splices($line_nb, $to_delete, $record)} or do {
     my $err = $@;
-    $self->rollback_update;
+    $self->rollback_update($record);
     die $err;
   };
 
   # call hook after update
-  $self->after_update;
+  $self->after_update($record);
 }
 
 
@@ -777,8 +782,16 @@ sub before_update { #
 #----------------------------------------------------------------------
   my ($self, $record) = @_;
 
+  my ($key_field, @other_fields) = $self->{data}->headers;
+
+  # check inconsistencies in record key
+  my $supplied_key = $self->param($key_field);
+  my $self_key     = $record->{$key_field};
+  not $supplied_key or $supplied_key eq $self_key
+    or die "supplied key $supplied_key does not match record key $self_key";
+
   # copy defined params into record ..
-  foreach my $field ($self->{data}->headers) {
+  foreach my $field (@other_fields) {
     my $val = $self->param($field);
     $record->{$field} = $val unless not defined $val;
   }
@@ -870,6 +883,7 @@ sub user_match {
   # success if the list contains '*' or the current username
   return ($access_control_list =~ /\*|\b\Q$self->{user}\E\b/i);
 }
+
 
 
 1;
@@ -977,7 +991,6 @@ If you have mod_perl, the easiest way is to declare
 it as a mod_perl handler associated to C<.ftw> URLs.
 Edit your F<perl.conf> as follows :
 
-  PerlModule File::Tabular::Web
   <LocationMatch "\.ftw$">
     SetHandler modperl
     PerlResponseHandler File::Tabular::Web
@@ -1174,23 +1187,18 @@ in detail through the C<long> view.
 
 =head3 M
 
+If called with method GET, finds the record with the given key and 
+displays it through the
+C<modif> view (typically this view will be an HTML form).
+
   http://myServer/some/app.ftw?M=key
 
-Finds the record with the given key and displays it through the
-C<modif> view (typically this view will be an HTML form
-with an action to call the update URL (C<?U=key>).
-
-
-=head3 U
-
-  http://myServer/some/app.ftw?U=<key>&field1=val1&field2=val2&...
-
-Finds the record with the given key
+If called with method POST, 
+finds the record with the given key
 and updates it with given field names and values.
-Of course these can be (and even should be) passed through
-POST method instead of GET.
 After update, displays an update message through the C<msg> view.
-
+The form should contain a hidden field with name C<M>
+whose value is the id of the record to update.
 
 =head3 A
 
@@ -1264,7 +1272,11 @@ the default directory, C<< <server_root>/lib/tmpl/ftw >>
 =item C<self>
 
 handle to the C<File::Tabular::Web> object; from there you can access
-C<self.cfg> (configuration information), C<self.cgi> (CGI request object)
+C<self.url> (URL of the application), 
+C<self.server_root> (server root directory), 
+C<self.cfg> (configuration information, an L<AppConfig|AppConfig> object), 
+C<self.mtime> (modification time of the data file),
+C<self.modperl> or C<self.cgi>, 
 and C<self.msg> (last message). You can also 
 call methods L</can_do> or L</param>, like for example
 
@@ -1332,15 +1344,25 @@ So within templates we can write simple links like
     <a href="?M=[% record.Id %]">Modify this record</a>
   [% END # FOREACH  %]
 
-Similarly, HTML forms do not need an ACTION attribute,
-since by default they will submit to the same URL.
-So you can simply write something like
+
+=head2 Forms
+
+A typical form will look like
 
   <form method="post">
-   <input type="hidden" name="U" value="[% record.Id %]">
-   First Name <input name="firstname">
-   Last Name  <input name="lasttname">
+   <input type="hidden" name="M" value="[% record.id %]">
+   First Name <input name="firstname" value="[% record.firstname %]"><br>
+   Last Name  <input name="lasttname" value="[% record.lastname %]">
+   <input type="submit">
   </form>
+
+Usually there is no need to specify the C<action> of the
+form : the default action sent by the browser
+will be the same URL, and when the application
+receives a POST request, it knows it has 
+to update the record instead of displaying the form.
+The hidden field with name C<M> is needed to specify
+the key of the record to update.
 
 
 =head1 CONFIGURATION FILE
@@ -1401,9 +1423,6 @@ in section L</S>.
 
 =head2 [application]
 
-This section allows you to override some builtin
-defaults associated with the application.
-
 =over
 
 =item C<< dir=/some/directory >>
@@ -1433,6 +1452,12 @@ must be a subclass of C<File::Tabular::Web>.
 
 If true, the whole datafile will be slurped into memory and reused
 across requests (except update requests).
+
+=item C<< mtime=<format> >>
+
+Format to display the last modified time of the data file,
+using  L<POSIX strftime()|POSIX/strftime>.
+The result will be available to templates in C<< [% self.mtime %] >>
 
 =back
 
@@ -1517,7 +1542,7 @@ Declares C<< field >> to be a I<user field>, which means that whenever
 a record is updated, the current username will be automatically
 inserted in that field.
 
-=item C<< autonum <field>  >>
+=item C<< autoNum <field>  >>
 
 Activates autonumbering for new records ; the number will be
 stored in the given field.
@@ -1694,7 +1719,7 @@ object hash.
 Reads the phases definition table and decides about what to 
 do in the next phases.
 
-=head3 _open_data
+=head3 open_data
 
 Retrieves the name of the datafile, decides whether it
 should be opened for readonly or for update, and 
@@ -1728,7 +1753,7 @@ trailing spaces are automatically removed.
   [% self.can_do($action, [$record]) %]
 
 Tells whether the current user has permission to do 
-C<$action> (which might be 'edit', 'delete', etc.).
+C<$action> (which might be 'modif', 'delete', etc.).
 See explanations above about how permissions are specified
 in the initialisation file.
 Sometimes permissions are setup in a record-specific way
@@ -1867,6 +1892,7 @@ word equal to the username.
 
 Override in subclasses if you need other authorization
 schemes (like for example dealing with groups).
+
 
 =head1 AUTHOR
 

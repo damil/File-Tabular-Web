@@ -98,6 +98,10 @@ avoidMatchKey true         # searches will not match on first field (key)
 preMatch <span class=HL>   # string to insert for highlight
 postMatch </span>          # end string to insert for highlight
 
+[application]
+mtime = %d.%m.%Y %H:%M:%S
+
+
 [fixed]  # parameters in this section cannot be overridden by CGI parameters
 
 max = 99999                # max records retrieved
@@ -145,6 +149,9 @@ __%s_wrapper.tt____________________________________________________________
 </fieldset>
 </form>
 
+<div style="font-size:70%;width:100%;text-align:right">
+Last modified: [% self.mtime %]
+</div>
 
 [% content %]
 </body>
@@ -235,14 +242,14 @@ __%s_modif.tt______________________________________________________________
    key = r.{% key_header %} %]
 
 <form method="POST">
-<input type="hidden" name="U" value="[% key %]">
-
+<input type="hidden" name="M" value="[% key %]">
 
 <h2>Modify record [% key %]</h2>
 
 <table border>
 {% FOREACH header IN headers; 
-   NEXT IF loop.first; # skip first field (not allowed to edit key) %}
+   NEXT IF header==key_header; # skip (not allowed to edit key) 
+%}
 <tr>
   <td align="right">{% header %}</td>
   <td><input name="{% header %}" value="[% r.{% header %} %]" size="40"></td>

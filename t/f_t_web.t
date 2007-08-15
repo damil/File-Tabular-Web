@@ -9,12 +9,12 @@ use Test::More tests => 11;
 
 
 BEGIN {
-  use lib "../lib";
+#  use lib "../lib";
   use_ok( 'File::Tabular::Web' );
 }
 
-#my $DIR = "t";
-my $DIR = ".";
+my $DIR = "t";
+# my $DIR = ".";
 
 # get a fresh copy of the data file
 copy("$DIR/htdocs/html/entities_src.txt", "$DIR/htdocs/html/entities.txt")
@@ -38,10 +38,9 @@ sub response {
 
   # reinitialize CGI
   CGI::initialize_globals();
-  $ENV{QUERY_STRING} = $query;
 
   # call the handler
-  File::Tabular::Web->handler();
+  File::Tabular::Web->handler($query);
 
   return $response;
 }
@@ -51,7 +50,7 @@ like(response(""),
      qr[Welcome], 
      'homepage');
 
-my $search_all = response("S=*");
+my $search_all = response({S=>"*"});
 
 like($search_all,
      qr[<b>67</b> results found],
@@ -77,9 +76,12 @@ like(response("M=221"),
      qr[<input name="Name" value="Yacute">],
      'modify');
 
-like(response("U=221"), 
-     qr[Updated.*221],
-     'update');
+{
+  local $ENV{REQUEST_METHOD}  = "POST";
+  like(response({M => 221}), 
+       qr[Updated.*221],
+       'update');
+}
 
 like(response("D=221"), 
      qr[Deleted.*221],
