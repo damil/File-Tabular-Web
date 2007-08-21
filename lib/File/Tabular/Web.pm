@@ -2,15 +2,21 @@
 
 TODO 
 
- - check good working of orderBy
+ - still problem with POST (cf. aud.ftw). 
+     - works in MSIE + FIDDLER
+     - does not work with Firefox
+
+
+
+ - check completeness of logging code
+ - simplify app_init for Template->new
+ - how to remove an attached document
  - system to control headers
  - automatically set expire header if modify is enabled
  - create logger in new() + use Time::HiRes
  - server-side record validation using "F::T where syntax" (f1 > val, etc.)
     or using code hook
- - template for $self->delete (either default or user-supplied)
  - more clever generation of wordsQueried in search
- - check config file (exists, non-empty, valid)
  - options qw/preMatch postMatch avoidMatchKey fieldSep recordSep/
     should be in a specific section
  - make compatibility with modperl1
@@ -49,7 +55,6 @@ use Carp;
 use CGI;
 use Template;
 use POSIX 'strftime';
-use File::Basename;
 use List::Util      qw/min/;
 use List::MoreUtils qw/uniq any all/;
 use AppConfig       qw/:argcount/;
@@ -82,7 +87,7 @@ sub handler : method {
       $self->{view} = 'msg';
 
       # try displaying through msg view..
-      eval {$self->_display}
+      eval {$self->display}
         or do { # .. or else fallback with simple HTML page
           my $content = "<html>$self->{msg}</html>\n";
           if (ref($_[0]) =~ /^Apache2/) { # if under mod_perl
@@ -109,7 +114,8 @@ sub _app_new { # creates a new application hashref (not an object)
   my $app = {};
 
   # application name and directory : defaults from the name of config file
-  @{$app}{qw(name dir suffix)} = fileparse($config_file, qr/\.[^.]*$/);
+#  @{$app}{qw(name dir suffix)} = fileparse($config_file, qr/\.[^.]*$/);
+  @{$app}{qw(dir name)} = ($config_file =~ m[^(.+[/\\])(.+?)(?:\.[^.]*)$]);
 
   # read the config file
   $app->{cfg} = $class->_app_read_config($config_file);
@@ -187,19 +193,23 @@ sub app_initialize {
   # takes into account the subclass which may have been given in the
   # config file.
 
-  my ($self) = @_;
-  my $app    = $self->{app};
+  my ($self)   = @_;
+  my $app      = $self->{app};
+  my ($last_dir) = ($app->{dir} =~ m[^.*[/\\](.+)[/\\]?$]);
+  my $default  = $self->app_tmpl_default_dir;
 
   # directories to search for Templates
-  my @tmpl_dirs = map {$_} ($app->{cfg}->get("template_dir"), 
-                            $app->{dir}, 
-                            $self->app_tmpl_default_dir);
+  my @tmpl_dirs = grep {-d} ($app->{cfg}->get("template_dir"), 
+                             $app->{dir}, 
+                             "$default/$last_dir",
+                             $default);
 
   # initialize template toolkit object
   $app->{tmpl} = Template->new({
     INCLUDE_PATH => \@tmpl_dirs,
     FILTERS      => $self->app_tmpl_filters,
-   });
+   })
+    or die Template->error;
 }
 
 
@@ -336,7 +346,7 @@ sub _setup_phases { # decide about next phases
   my %request_phases = $self->app_phases_definitions;
 
   # find out which single-letter was requested
-  my @letters = grep {defined $self->param($_)} keys %request_phases;
+  my @letters = grep {defined $request_phases{$_}} uniq $self->param;
   @letters <= 1
     or die "conflict in request: " . join(" / ", @letters);
   my $letter = $letters[0] || "H"; # by default : homepage
@@ -407,13 +417,18 @@ sub param { # always returns a scalar value
 #----------------------------------------------------------------------
   my ($self, $p) = @_;
 
+  my $param_src = $self->{apache2_request} || $self->{cgi};
+
+  # if no arg, just call the relevant API to get list of param names
+  return $param_src->param if not defined $p;
+
   # first check in "fixed" section in config
   my $val = $self->{cfg}->get("fixed_$p");
   return $val if $val;
 
   # then check in parameters to this request
-  my $param_src = $self->{apache2_request} || $self->{cgi};
   my @vals = $param_src->param($p);
+
   if (@vals) {
     $val = join(' ', @vals);    # join multiple values
     $val =~ s/^\s+//;           # remove initial spaces
@@ -432,12 +447,12 @@ sub can_do { # can be called from templates; $record is optional
   my ($self, $action, $record) = @_;
 
   my $allow  = $self->{cfg}->get("permissions_$action");
-  my $forbid = $self->{cfg}->get("permissions_no_$action");
+  my $deny = $self->{cfg}->get("permissions_no_$action");
 
   # some permissions are granted by default to everybody
   $allow ||= "*" if $action =~ /^(read|search|download)$/;
 
-  for ($allow, $forbid) {
+  for ($allow, $deny) {
     $_ = $self->user_match($_)    #    if acl list matches user name
        ||(   /\$(\S+)\b/i         # or if acl list contains a field name ...
 	  && defined($record)                   # ... and got a specific record
@@ -445,7 +460,7 @@ sub can_do { # can be called from templates; $record is optional
 	  && $self->user_match($record->{$1})); # ... and field content matches
   }
 
-  return $allow and not $forbid;
+  return $allow and not $deny;
 }
 
 
@@ -477,19 +492,19 @@ sub _dispatch_request { # go through phases and choose appropriate handling
   $self->{view} = 'msg' if $self->{msg}; 
 
   # print the output
-  $self->_display;
+  $self->display;
 }
 
 
 #----------------------------------------------------------------------
-sub _display { # display results in the requested view
+sub display { # display results in the requested view
 #----------------------------------------------------------------------
   my ($self) = @_;
   my $view = $self->{view} or die "display : no view";
 
   # name of the template for this view
   my $tmpl_name = $self->{cfg}->get("template_$view")
-               || "$self->{app}{name}_$view.tt";
+                || "$self->{app}{name}_$view.tt";
 
   # call that template
   my $body;
@@ -497,14 +512,23 @@ sub _display { # display results in the requested view
   $self->{app}{tmpl}->process($tmpl_name, $vars, \$body)
     or die $self->{app}{tmpl}->error();
 
+  $self->_emit_page(\$body);
+}
+
+
+#----------------------------------------------------------------------
+sub _emit_page {
+#----------------------------------------------------------------------
+  my ($self, $body_ref) = @_;
+
   # print headers and body
-  my $length   = length $body;
+  my $length   = length $$body_ref;
   my $modified = $self->{data}->stat->{mtime};
   if ($self->{modperl}) {
     $self->{modperl}->set_last_modified($modified);
     $self->{modperl}->set_content_length($length);
     $self->{modperl}->headers_out->add(Expires => 0);
-    $self->{modperl}->print($body);
+    $self->{modperl}->print($$body_ref);
   }
   else {
     my $CRLF = "\015\012";
@@ -513,7 +537,7 @@ sub _display { # display results in the requested view
         . "Last-modified: $modified$CRLF"
         . "Expires: 0$CRLF"
         . "$CRLF"
-        . $body;
+        . $$body_ref;
   }
 }
 
@@ -531,8 +555,10 @@ sub search_key { # search by record key
   $self->can_do("read") or 
     die "no 'read' permission for $self->{user}";
   $key or die "search_key : no key!";
+  $key =~ s/<.*?>//g; # remove any markup (maybe inserted by pre/postMatch)
 
   my $query = "K_E_Y:$key";
+
   my ($records, $lineNumbers) = $self->{data}->fetchall(where => $query);
   my $count = @$records;
   $self->{results} = {count       => $count, 
@@ -667,9 +693,13 @@ sub params_for_next_slice {
 #----------------------------------------------------------------------
   my ($self, $start) = @_;
 
+  # need request object to invoke native param() method
+  my $req = $self->{apache2_request} || $self->{cgi}; 
+
   my @params = ("S=$self->{search_string_orig}", "start=$start");
-  push @params, "orderBy=$self->{orderBy}" if $self->{orderBy};
-  push @params, "count=$self->{count}"  if $self->{count};
+  push @params, "orderBy=$self->{orderBy}" if $req->param('orderBy');
+  push @params, "count=$self->{count}"     if $req->param('count');
+
   return @params;
 }
 
@@ -759,7 +789,7 @@ sub update {
   # prepare message to user
   my @headers = $self->{data}->headers;
   my $data_line = join("|", @{$record}{@headers});
-  my $id = $record->{$headers[0]};
+  my $id = $self->key($record);
   $self->{msg} .= "<br>Updated:<br>"
                .  "<a href='?S=K_E_Y:$id'>Record $id</a>: $data_line<br>";
 
@@ -782,26 +812,23 @@ sub before_update { #
 #----------------------------------------------------------------------
   my ($self, $record) = @_;
 
-  my ($key_field, @other_fields) = $self->{data}->headers;
-
-  # check inconsistencies in record key
-  my $supplied_key = $self->param($key_field);
-  my $self_key     = $record->{$key_field};
-  not $supplied_key or $supplied_key eq $self_key
-    or die "supplied key $supplied_key does not match record key $self_key";
-
   # copy defined params into record ..
-  foreach my $field (@other_fields) {
+  my $key_field = $self->param($self->key_field);
+  foreach my $field ($self->{data}->headers) {
     my $val = $self->param($field);
-    $record->{$field} = $val unless not defined $val;
+    next if not defined $val;
+    if ($field eq $key_field and $val ne $self->key($record)) {
+      die "supplied key $val does not match record key";
+    }
+    $record->{$field} = $val;
   }
 
   # force username into user field (if any)
-  my $user_field = $self->{user_field};
+  my $user_field = $self->{app}{user_field};
   $record->{$user_field} = $self->{user} if $user_field;
 
   # force current time or date into time fields (if any)
-  while (my ($k, $fmt) = each %{$self->{time_fields}}) {
+  while (my ($k, $fmt) = each %{$self->{app}{time_fields}}) {
     $record->{$k} = strftime($fmt, localtime);
   }
 }
@@ -885,6 +912,24 @@ sub user_match {
 }
 
 
+#----------------------------------------------------------------------
+sub key_field { 
+#----------------------------------------------------------------------
+  my ($self) = @_;
+  return ($self->{data}->headers)[0];
+}
+
+
+#----------------------------------------------------------------------
+sub key { # returns the value in the first field of the record
+#----------------------------------------------------------------------
+  my ($self, $record) = @_;
+
+  # optimized version, breaking encapsulation of File::Tabular
+  return (tied %$record)->[1];
+
+  # going through official API would be : return $record->{$self->key_field};
+}
 
 1;
 
@@ -1616,6 +1661,13 @@ Methods starting with an underscore are meant to
 be I<private>, i.e. should not be redefined in subclasses.
 All other methods are I<protected>.
 
+Currently we use plain old Perl inheritance
+and calls to C<SUPER>. A future move 
+to the C3 method resolution order (see L<Class::C3>) is planned,
+but is not totally trivial because classes are sometimes
+loaded dynamically.
+
+
 =head2 Entry point
 
 =head3 handler
@@ -1738,15 +1790,18 @@ to detect changes and invalidate the cache.
 
 =head3 param
 
-  [% self.param($param_name) %]
+  [% self.param(param_name) %]
 
 Returns the value that was specified under C<$param_name> in the
 HTTP request, or in the configuration file (see the 
 description of C<< [fixed]/[default] >> sections).
 
-The return value is always a scalar; in case of multiple
-HTTP values, they are joined with a space. Initial and
-trailing spaces are automatically removed.
+If C<param_name> is given, the return value is always a scalar; in
+case of multiple HTTP values, they are joined with a space. Initial
+and trailing spaces are automatically removed.
+
+With no argument, the method returns the list of parameter
+names received by this request.
 
 =head3 can_do
 
@@ -1768,11 +1823,16 @@ data record.
 
 Executes the various phases of request handling
 
-=head3 _display
+=head3 display
 
 Finds the template corresponding to the view name,
 gathers its output, and prints it together with 
 some HTTP headers.
+
+=head3 _emit_page
+
+Internal method for printing headers and body, 
+using API from modperl or CGI.
 
 =head2 Request handling : search methods
 
@@ -1892,6 +1952,16 @@ word equal to the username.
 
 Override in subclasses if you need other authorization
 schemes (like for example dealing with groups).
+
+=head3 key_field
+
+Returns the name of the key field in the data file.
+
+=head3 key
+
+  my $key = $self->key($record);
+
+Returns the value in the first field of the record.
 
 
 =head1 AUTHOR

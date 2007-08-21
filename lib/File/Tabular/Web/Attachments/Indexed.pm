@@ -21,7 +21,7 @@ sub app_initialize {
 
   @indexed < 2 or die "currently no support for multiple indexed fields";
 
-  $self->{app}{indexed_fields} = \@indexed;
+  $self->{app}{indexed_field} = $indexed[0];
 }
 
 
@@ -81,14 +81,9 @@ sub before_search {
     # will require more clever handling in File::Tabular::compile_query 
     # using some kind of representation for sets of integers (bit vectors
     # or Set::IntSpan::Fast)
-
+    # ASSUMES the document number is the record key, stored in firest field
     my $doc_ids       = join "|", keys %{$result->{scores}}
       or return;                # no scores, no results
-
-    # my $doc_num_field = ($self->{data}->headers)[0];
-    # $self->{search_string} = "$doc_num_field ~ '^(?:$doc_ids)\$'";
-    # ASSUMES the document number is the record key, stored in firest field
-
     $self->{search_string} = "~'^(?:$tmp)\\b'" 
     $self->{search_string} .= " AND ($self->{search_string_orig})" 
       if $self->{search_string_orig};
@@ -144,7 +139,7 @@ sub add_excerpts { # add text excerpts from attached files
   # add excerpts into each displayed record
   my $regex = $self->{results}->{regex};
   foreach my $record (@{$self->{results}{records}}) {
-    my $buf = $self->indexed_doc_content($self, $record);
+    my $buf = $self->indexed_doc_content($record);
     my $excerpts = $self->{indexer}->excerpts($buf, $regex);
     $record->{excerpts} = join(' / ', @$excerpts);
   }
@@ -172,36 +167,52 @@ sub params_for_next_slice {
 
 
 #======================================================================
-#                 REQUEST HANDLING : UPDATE METHODS                   #
+#                        HANDLING ATTACHMENTS                         #
 #======================================================================
 
-# TODO : CODE FOR INDEXING AT UPDATES
-
-
-
-#======================================================================
-#                 REQUEST HANDLING : DELETE METHODS                   #
-#======================================================================
 
 #----------------------------------------------------------------------
-sub after_delete {
+sub after_add_attachment {
 #----------------------------------------------------------------------
-  my ($self, $record)= @_;
+  my ($self, $record, $field, $path) = @_;
 
-  $self->SUPER::after_delete($record);
-  $self->delete_from_index($record);
+  if ($field eq $self->{app}{indexed_field}) {
+    my $buf  = $self->indexed_doc_content($record);
+    delete self->{app}{indexer};
+    my $indexer = Search::Indexer->new(dir       => $self->{app}{dir},
+                                       writeMode => 1);
+    $indexer->add($self->key($record), $buf);
+  }
+}
+
+#----------------------------------------------------------------------
+sub before_delete_attachment {
+#----------------------------------------------------------------------
+  my ($self, $record, $field, $path) = @_;
+
+  if ($field eq $self->{app}{indexed_field}) {
+    delete self->{app}{indexer};
+    my $indexer = Search::Indexer->new(dir       => $self->{app}{dir},
+                                       writeMode => 1);
+    $indexer->remove($self->key($record));
+  }
 }
 
 
-# REPLACE BY GENERIC CODE (NOT DEPENDENT FROM MINUTES)
-sub delete_from_index {
-  my ($self, $record)= @_;  
-  $self->enqueue("del", $record);
+#----------------------------------------------------------------------
+sub indexed_doc_content {
+#----------------------------------------------------------------------
+  my ($self, $record) = @_;
+
+  # this is the default implementation, MOST PROBABLY INADEQUATE
+  # should be overridden in subclasses
+
+  my $path = $self->upload_fullpath($record, $self->{indexed_field});
+  open my $fh, $path or die "open $path: $!";
+  local $/;
+  my $content = <$fh>; # just return the file content
+  return $content;
 }
-
-
-
-
 
 
 
@@ -220,12 +231,24 @@ This abstract class adds support for
 fulltext indexing in documents attached to a
 L<File::Tabular::Web|File::Tabular::Web> application.
 
-You B<must> write a subclass that redefines the 
+Most probably you should write a subclass that redefines the 
 L</indexed_doc_content> method (for translating
-the content of the attached document to plain text) --
-this cannot be guessed by the present framework.
+the content of the attached document to plain text).
+The default implementation just returns the raw file content,
+but this is I<most probably inadequate> : if the attached
+file is in binary format (like a C<.doc> document), or
+even in HTML, some translation process must be programmed,
+and cannot be guessed by the present framework.
 
 
+=head1 RESERVED FIELD NAMES
+
+Records retrieved from a fulltext search will have two 
+additional fields : C<score> (how well the document 
+matched the query) and C<excerpts> (strings
+of text fragments close to the searched words).
+Therefore those field names should not be present
+as regular fields in the data file.
 
 =head1 CONFIGURATION
 
@@ -234,9 +257,15 @@ this cannot be guessed by the present framework.
   upload fieldname1
   upload fieldname2 = indexed
 
-Currently only one single upload field can be indexed.
+Currently only one single upload field can be indexed
+within a given application.
+
+=head1 METHODS
 
 =head1 SUBCLASSING
+
+=head2 indexed_doc_content
+
 
 =cut
 

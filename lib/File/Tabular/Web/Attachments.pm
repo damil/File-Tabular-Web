@@ -17,7 +17,6 @@ use strict;
 use warnings;
 
 use File::Path;
-use File::Basename;
 use Scalar::Util qw/looks_like_number/;
 
 
@@ -55,9 +54,10 @@ sub before_update { #
 
   my @upld = keys %{$self->{app}{upload_fields}};
 
-  # remember names of old files (in case we must delete them later)
+  # remember paths and names of old files (in case we must delete them later)
   foreach my $field (grep {$record->{$_}} @upld) {
-    $self->{old_path}{$field} = $self->upload_path($record, $field);
+    $self->{old_name}{$field} = $record->{$field};
+    $self->{old_path}{$field} = $self->upload_fullpath($record, $field);
   }
 
   # call parent method
@@ -69,7 +69,14 @@ sub before_update { #
   }
 
   # now deal with file uploads
-  $self->do_upload_file($record, $_) foreach @upld;
+  foreach my $field (@upld) {
+    if (my $remote_name = $self->param($field)) {
+      $self->do_upload_file($record, $field, $remote_name);
+    }
+    else { # upload is "" ==> must restore old name in record
+      $record->{$field} = $self->{old_name}{$field} || "";
+    }
+  };
 }
 
 #----------------------------------------------------------------------
@@ -98,9 +105,10 @@ sub do_upload_file { #
   }
 
   # compute server name and server path
-  $record->{$field} = $self->upload_name($record, $field, $remote_name);
-  my $path          = $self->upload_path($record, $field);
-  my $old_path      = $self->{old_path}{$field};
+  $record->{$field} 
+                = $self->generate_upload_name($record, $field, $remote_name);
+  my $path      = $self->upload_fullpath($record, $field);
+  my $old_path  = $self->{old_path}{$field};
 
   # avoid clobbering existing files
   not -e $path or $path eq $old_path
@@ -111,10 +119,11 @@ sub do_upload_file { #
     or die "multiple uploads to same server location : $path";
 
   # remember new and old path
-  $self->{results}{uploaded}{$path} = $old_path;
+  $self->{results}{uploaded}{$path} = {field    => $field,
+                                       old_path => $old_path};
 
   # do the transfer
-  my ($filename, $dir) = fileparse($path);
+  my ($dir) = ($path =~ m[^(.*)[/\\]]);
   -d $dir or mkpath $dir; # will die if can't make path
   open my $dest_fh, ">$path.new" or die "open >$path.new : $!";
   binmode($dest_fh), binmode($src_fh);
@@ -133,8 +142,15 @@ sub after_update {
   my $uploaded = $self->{results}{uploaded};
 
   # rename uploaded files and delete old versions
-  while (my ($path, $old_path) = each %$uploaded) {
+  while (my ($path, $info) = each %$uploaded) {
+    my $field    = $info->{field};
+    my $old_path = $info->{old_path};
+
+    $self->before_delete_attachment($record, $field, $old_path)
+      if $old_path;
+
     rename "$path.new", "$path" or die "rename $path.new => $path : $!";
+
     if ($old_path) {
       if ($old_path eq $path) {
 	$self->{msg} .= "old file $old_path has been replaced<br>";
@@ -145,6 +161,7 @@ sub after_update {
                                    : "<br>remove $old_path : $^E<br>";
       }
     }
+    $self->after_add_attachment($record, $field, $path);
   }
 }
 
@@ -157,7 +174,7 @@ sub rollback_update { # undo what was done by "before_update"
   my ($self, $record) = @_;
   my $uploaded = $self->{results}{uploaded};
   foreach my $path (keys %$uploaded) {
-    unlink($path);
+    unlink("$path.new");
   }
 }
 
@@ -176,54 +193,73 @@ sub after_delete {
   foreach my $field (@upld) {
     my $path = $self->upload_path($record, $field) 
       or next;
+
+    $self->before_delete_attachment($record, $path);
     my $unlink_ok = unlink "$path";	
     my $msg = $unlink_ok ? "was suppressed" : "couldn't be suppressed ($!)";
     $self->{msg} .= "Attached file $path $msg<br>";
+    $self->after_delete_attachment($record, $path);
   }
 }
 
 
 #----------------------------------------------------------------------
-sub upload_name { # default implementation; override in subclasses
+sub generate_upload_name {
 #----------------------------------------------------------------------
   my ($self, $record, $field, $remote_name)= @_;
 
   # just keep the trailing part of the remote name
   $remote_name =~ s{^.*[/\\]}{};
+  return $remote_name;
+}
 
-  my $upload_name = $remote_name;
+
+#----------------------------------------------------------------------
+sub upload_path { 
+#----------------------------------------------------------------------
+  my ($self, $record, $field)= @_;
+
+  # ASSUMES that upload name was already stored in $record->{$field}
 
   # get the id of that record; if creating, cheat by guessing next autoNum
   my $autonum_char = $self->{data}{autoNumChar};
-  my $key_field    = ($self->{data}->headers)[0];
-  my $key_val      = $record->{$key_field};
-  $key_val =~ s/$autonum_char/$self->{next_autoNum}/;
+  (my $key = $self->key($record)) =~ s/$autonum_char/$self->{next_autoNum}/;
 
-  if (looks_like_number($key_val)) {
-    my $subdir = sprintf "%05d", int($key_val / 100);
-    $upload_name =  "$subdir/${key_val}_${remote_name}";
-  }
+  my $dir = looks_like_number($key) ? sprintf "%05d/", int($key / 100)
+                                    : "";
 
-  return $upload_name;
+  return "${field}/${dir}${key}_$record->{$field}";
 }
 
 
 #----------------------------------------------------------------------
-sub upload_path { # default implementation; override in subclasses
+sub upload_fullpath { 
 #----------------------------------------------------------------------
   my ($self, $record, $field)= @_;
 
-  return join "/", $self->{app}{dir}, $field, $record->{$field};
+  return "$self->{app}{dir}" . $self->upload_path($record, $field);
 }
 
 
 #----------------------------------------------------------------------
-sub download_url { # default implementation; override in subclasses
+sub download { # default implementation; override in subclasses
 #----------------------------------------------------------------------
   my ($self, $record, $field)= @_;
 
-  return join "/", $field, $record->{$field};
+  return $self->upload_path($record, $field); # relative to app URL
 }
+
+
+
+
+sub after_add_attachment     {}
+sub before_delete_attachment {}
+
+
+
+
+
+
 
 1;
 
@@ -322,43 +358,65 @@ Checks that we are not going to clobber an existing
 file on the server.
 
 
-=head2 upload_name
+=head2 generate_upload_name
 
-  my $name = $self->upload_name($record, $field_name, $remote_name)
+  my $name = $self->generate_upload_name($record, $field_name, $remote_name)
 
-Returns the partial pathname that will be stored in the record field.
+Returns the name that will be stored in the record field
+for the attached document. The actual path for that
+document on the server will be generated through
+method L</upload_fullpath>.
+The default implementation returns the last 
+part of C<$remote_name> (removing initial directories).
+
+=head2 upload_path
+
+  my $path = $self->upload_path($record, $fieldname)
+
+Returns a I<relative> path to the attached document.
 The default implementation takes the numeric id of the record
-(if any) and concatenates it with the C<$remote_name>;
+(if any) and concatenates it with the name generated by
+L</generate_upload_name>;
 furthermore, this is put into subdirectories by ranges 
 of 100 numbers : so for example file C<foo.txt> in 
 record with id C<1234> will become
 C<00012/1234_foo.txt>.
 This behaviour may be redefined in subclasses.
 
-=head3 upload_path
+=head3 upload_fullpath
 
-  my $path = $self->upload_path($record, $fieldname)
+  my $fullpath = $self->upload_fullpath($record, $fieldname)
 
 Returns a full pathname to the attached document.
-The default implementation concatenates the application
-directory, the C<$fieldname> (corresponding to a subdirectory),
-and then the file name stored in C<<  $record->{$fieldname} >>.
-This behaviour may be redefined in subclasses.
+This is the location where the file is stored on the server.
+The default value is the concatenation of 
+C<< $self->{app}{dir} >> and << $self->upload_path($record, $field) >>.
 
 
-=head3 download_url
 
-  my $url = $self->download_url($record, $fieldname)
+=head3 download
+
+  my $url = $self->download($record, $fieldname)
 
 Returns an url to the attached document, relative
 to the application url. So it can be used in templates
 as follows
 
-  [% SET download_url = self.download_url(record, fieldname); %]
-  [% IF download_url %]
-    <a href="[% download_url %]">Attached document</a>
-  [% END; # IF download_url %]
+  [% IF record.$fieldname %]
+    <a href="[% self.download(record, fieldname) %]">
+       Attached document : [% record.$fieldname %]
+    </a>
+  [% END; # IF %]
 
 
 
+=head2 hooks before / after adding or deleting attachments
+
+  $self->after_add_attachment$record, $field, $path)
+  $self->before_delete_attachment$record, $field, $path)
+
+These methods are called each time an attachment is
+added or deleted. The default implementation is empty
+Subclasses may add code for example for converting the file
+or indexing it.
 
