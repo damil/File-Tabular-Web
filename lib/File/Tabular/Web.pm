@@ -195,14 +195,16 @@ sub app_initialize {
 
   my ($self)   = @_;
   my $app      = $self->{app};
-  my ($last_dir) = ($app->{dir} =~ m[^.*[/\\](.+)[/\\]?$]);
+  my ($last_subdir) = ($app->{dir} =~ m[^.*[/\\](.+)[/\\]?$]);
   my $default  = $self->app_tmpl_default_dir;
 
   # directories to search for Templates
   my @tmpl_dirs = grep {-d} ($app->{cfg}->get("template_dir"), 
                              $app->{dir}, 
-                             "$default/$last_dir",
-                             $default);
+                             "$default/$last_subdir",
+                             $default,
+                             "$default/default",
+                            );
 
   # initialize template toolkit object
   $app->{tmpl} = Template->new({
@@ -502,9 +504,11 @@ sub display { # display results in the requested view
   my ($self) = @_;
   my $view = $self->{view} or die "display : no view";
 
+
   # name of the template for this view
-  my $tmpl_name = $self->{cfg}->get("template_$view")
-                || "$self->{app}{name}_$view.tt";
+  my $default_tmpl = $view eq 'download' ? "download.tt"
+                                         : "$self->{app}{name}_$view.tt";
+  my $tmpl_name = $self->{cfg}->get("template_$view") || $default_tmpl;
 
   # call that template
   my $body;
@@ -1304,7 +1308,11 @@ C<< [template]dir >>
 
 =item *
 
-the default directory, C<< <server_root>/lib/tmpl/ftw >>
+some default directories: 
+  C<< <server_root>/lib/tmpl/ftw/<application_name> >>,
+  C<< <server_root>/lib/tmpl/ftw/<default> >>,
+  C<< <server_root>/lib/tmpl/ftw >>.
+
 
 =back
 
