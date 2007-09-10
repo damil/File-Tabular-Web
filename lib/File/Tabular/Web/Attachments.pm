@@ -89,9 +89,11 @@ sub do_upload_file { #
 
   my $src_fh;
 
-  if ($self->{apache2_request}) {
+  if ($self->{modperl}) {
+    require Apache2::Request;
     require Apache2::Upload;
-    $src_fh = $self->{apache2_request}->upload($field)->fh;
+    my $req = Apache2::Request->new($self->{modperl});
+    $src_fh = $req->upload($field)->fh;
   }
   else {
     my @upld_fh = $self->{cgi}->upload($field); # may be an array 
@@ -191,13 +193,13 @@ sub after_delete {
   # suppress files attached to deleted record
   my @upld = keys %{$self->{app}{upload_fields}};
   foreach my $field (@upld) {
-    my $path = $self->upload_path($record, $field) 
+    my $path = $self->upload_fullpath($record, $field) 
       or next;
 
     $self->before_delete_attachment($record, $path);
     my $unlink_ok = unlink "$path";	
     my $msg = $unlink_ok ? "was suppressed" : "couldn't be suppressed ($!)";
-    $self->{msg} .= "Attached file $path $msg<br>";
+    $self->{msg} .= "<br>Attached file $path $msg";
   }
 }
 
@@ -218,7 +220,7 @@ sub upload_path {
 #----------------------------------------------------------------------
   my ($self, $record, $field)= @_;
 
-  # ASSUMES that upload name was already stored in $record->{$field}
+  return "" if not $record->{$field};
 
   # get the id of that record; if creating, cheat by guessing next autoNum
   my $autonum_char = $self->{data}{autoNumChar};
@@ -235,8 +237,8 @@ sub upload_path {
 sub upload_fullpath { 
 #----------------------------------------------------------------------
   my ($self, $record, $field)= @_;
-
-  return "$self->{app}{dir}" . $self->upload_path($record, $field);
+  my $path = $self->upload_path($record, $field);
+  return $path ? "$self->{app}{dir}$path" : "";
 }
 
 
