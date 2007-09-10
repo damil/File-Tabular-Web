@@ -1,12 +1,11 @@
-ll[%- WRAPPER entities_main.tt -%]
+[%- WRAPPER entities_main.tt -%]
 
 
 [% import(found.records.0); %]
 
 <h2>HTML Entity [% Name %]</h2>
 
-<form>
-<input type=hidden name="U" value="[% Num %]">
+<form method="post" action="[% self.url %]">
 <table border>
 
 <tr><td>Number</td>

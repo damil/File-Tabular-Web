@@ -2,12 +2,6 @@
 
 TODO 
 
- - still problem with POST (cf. aud.ftw). 
-     - works in MSIE + FIDDLER
-     - does not work with Firefox
-
-
-
  - check completeness of logging code
  - simplify app_init for Template->new
  - how to remove an attached document
@@ -246,10 +240,11 @@ sub app_phases_definitions {
   return (
 
     A => # prepare a new record for adding
-      {pre => 'empty_record',                           view => 'modif'   },
+      {GET  => {pre => 'empty_record',                  view => 'modif'},
+       POST => {pre => 'empty_record', op => 'update'                  }  },
 
     D => # delete record
-      {pre => 'search_key',     op => 'delete'                            },
+      {pre => 'search_key', op => 'delete'                                },
 
     H => # display home page
       {                                                 view => 'home'    },
@@ -259,10 +254,10 @@ sub app_phases_definitions {
 
     M => # modif: GET displays the form, POST performs the update
       {GET  => {pre => 'search_key',                    view => 'modif'},
-       POST => {pre => 'prepare_update', op => 'update'                }  },
+       POST => {pre => 'search_key', op => 'update'                }  },
 
     S => # search and display "short" view
-      {pre => 'search',         op => 'sort_and_slice', view => 'short'   },
+      {pre => 'search', op => 'sort_and_slice',         view => 'short'   },
 
     X => # display all records in "download view" (mnemonic: eXtract)
       {pre => 'prepare_download',                       view => 'download'},
@@ -292,8 +287,8 @@ sub _new { # creates a new instance of a request object
     $self->{method}      = $self->{modperl}->method;
     $path                = $self->{modperl}->filename;
 
-    require Apache2::Request;
-    $self->{apache2_request} = Apache2::Request->new($self->{modperl});
+    require APR::Request::Apache2;
+    $self->{APR_request} = APR::Request::Apache2->handle($self->{modperl});
   }
   else { # create the CGI instance
     $self->{cgi}         = CGI->new(@_);
@@ -349,9 +344,27 @@ sub _setup_phases { # decide about next phases
 
   # find out which single-letter was requested
   my @letters = grep {defined $request_phases{$_}} uniq $self->param;
-  @letters <= 1
-    or die "conflict in request: " . join(" / ", @letters);
-  my $letter = $letters[0] || "H"; # by default : homepage
+
+  # cannot ask for several operations at once
+  @letters <= 1 or die "conflict in request: " . join(" / ", @letters);
+
+  # by default : homepage
+  my $letter = $letters[0] || "H"; 
+
+  # argument passed to operation
+  my $letter_arg = $self->param($letters[0]);
+
+  # special case : with POST requests, we want to also consider the ?A or ?M=..
+  # or ?D=.. from the query string
+  if (not @letters and $self->{method} eq 'POST') {
+    my ($target, $method) = 
+      $self->{modperl} ? ($self->{APR_request}, "args"     )
+                       : ($self->{cgi},         "url_param");
+    for my $try_letter (qw/A M D/) {
+      $letter_arg = $target->$method($try_letter);
+      $letter = $try_letter and last if defined($letter_arg);
+    }
+  }
 
   # setup info in $self according to the chosen letter
   my $entry     = $request_phases{$letter};
@@ -360,7 +373,7 @@ sub _setup_phases { # decide about next phases
   $self->{pre}  = $phases->{pre};
   $self->{op}   = $phases->{op};
 
-  return $self->param($letter);
+  return $letter_arg;
 }
 
 
@@ -417,20 +430,26 @@ sub open_data { # open File::Tabular object on data file
 #----------------------------------------------------------------------
 sub param { # always returns a scalar value 
 #----------------------------------------------------------------------
-  my ($self, $p) = @_;
+  my ($self, $param_name) = @_; # $param_name might be undef
 
-  my $param_src = $self->{apache2_request} || $self->{cgi};
+  # Unified way to get to param() method in the underlying layer.
+  # On POST requests, CGI->param(..) only returns body params, while
+  # APR::Request->param(..) returns both query string and body params;
+  # here we only want body params, so we must call another method (body).
+  my $target = $self->{modperl} ? $self->{APR_request} : $self->{cgi};
+  my $param_method 
+    = ($self->{modperl} && $self->{method} eq 'POST') ? 'body' : 'param';
+  my @vals = defined($param_name) ? $target->$param_method($param_name)
+                                  : $target->$param_method();
 
-  # if no arg, just call the relevant API to get list of param names
-  return $param_src->param if not defined $p;
+  # if no arg, just return the list of param names
+  return @vals if not defined $param_name;
 
-  # first check in "fixed" section in config
-  my $val = $self->{cfg}->get("fixed_$p");
+  # otherwise, first check in "fixed" section in config
+  my $val = $self->{cfg}->get("fixed_$param_name");
   return $val if $val;
 
   # then check in parameters to this request
-  my @vals = $param_src->param($p);
-
   if (@vals) {
     $val = join(' ', @vals);    # join multiple values
     $val =~ s/^\s+//;           # remove initial spaces
@@ -439,7 +458,7 @@ sub param { # always returns a scalar value
   }
 
   # finally check in "default" section in config
-  return $self->{cfg}->get("default_$p");
+  return $self->{cfg}->get("default_$param_name");
 }
 
 
@@ -529,6 +548,7 @@ sub _emit_page {
   my $length   = length $$body_ref;
   my $modified = $self->{data}->stat->{mtime};
   if ($self->{modperl}) {
+    $self->{modperl}->content_type('text/html');
     $self->{modperl}->set_last_modified($modified);
     $self->{modperl}->set_content_length($length);
     $self->{modperl}->headers_out->add(Expires => 0);
@@ -641,11 +661,13 @@ sub sort_and_slice { # sort results, then just keep the desired slice
   }
 
   # restrict to the desired slice
-  my $start_record = $self->param('start') || 0;
+  my $start_record = $self->param('start') || ($self->{results}{count} ? 1 : 0);
   my $end_record   = min($start_record + $self->{count} - 1,
-			 $self->{results}{count} - 1);
-  $self->{results}{records} = 
-    [ @{$self->{results}{records}}[$start_record ... $end_record] ];
+			 $self->{results}{count});
+  die "illegal start value : $start_record" if $start_record > $end_record;
+  $self->{results}{records} = $self->{results}{count}  
+    ? [ @{$self->{results}{records}}[$start_record-1 ... $end_record-1] ]
+    : [];
 
   # check read permission on records (looping over records only if necessary)
   my $must_loop_on_records # true if  permission depends on record fields
@@ -663,18 +685,18 @@ sub sort_and_slice { # sort results, then just keep the desired slice
   }
 
   # for user display : record numbers start with 1, not 0 
-  $self->{results}{start} = $start_record + 1;
-  $self->{results}{end}   = $end_record + 1;
+  $self->{results}{start} = $start_record;
+  $self->{results}{end}   = $end_record;
 
 
   # links to previous/next slice
   my $prev_idx = $start_record - $self->{count};
-     $prev_idx = 0 if $prev_idx < 0;
+     $prev_idx = 1 if $prev_idx < 1;
   $self->{results}{prev_link} = $self->_url_for_next_slice($prev_idx)
-    if $start_record > 0;
+    if $start_record > 1;
   my $next_idx = $start_record + $self->{count};
   $self->{results}{next_link} = $self->_url_for_next_slice($next_idx)
-    if $next_idx < $self->{results}{count};
+    if $next_idx <= $self->{results}{count};
 }
 
 
@@ -698,7 +720,7 @@ sub params_for_next_slice {
   my ($self, $start) = @_;
 
   # need request object to invoke native param() method
-  my $req = $self->{apache2_request} || $self->{cgi}; 
+  my $req = $self->{APR_request} || $self->{cgi}; 
 
   my @params = ("S=$self->{search_string_orig}", "start=$start");
   push @params, "orderBy=$self->{orderBy}" if $req->param('orderBy');
@@ -741,9 +763,14 @@ sub empty_record { # to be displayed in "modif" view (when adding)
   $self->can_do("add") or 
     die "no 'add' permission for $self->{user}";
 
-  my $record = {};
+  # build a record and insert default values
+  my $record = $self->{data}->ht->new;
   my $defaults = $self->{cfg}->get("fields_default");
+  if (my $auto_num = $self->{data}{autoNumField}) {
+    $defaults->{$auto_num} ||= $self->{data}{autoNumChar};
+  }
   $record->{$_} = $defaults->{$_} foreach $self->{data}->headers;
+
   $self->{results} = {count => 1, records => [$record], lineNumbers => [-1]};
 }
 
@@ -793,8 +820,9 @@ sub update {
   # prepare message to user
   my @headers = $self->{data}->headers;
   my $data_line = join("|", @{$record}{@headers});
-  my $id = $self->key($record);
-  $self->{msg} .= "<br>Updated:<br>"
+  my ($msg, $id) = $is_adding ? ("Created", $self->{data}{autoNum})
+                              : ("Updated", $self->key($record));
+  $self->{msg} .= "<br>$msg:<br>"
                .  "<a href='?S=K_E_Y:$id'>Record $id</a>: $data_line<br>";
 
   # do the update
@@ -1400,10 +1428,11 @@ So within templates we can write simple links like
 
 =head2 Forms
 
-A typical form will look like
+=head3 Data input
 
-  <form method="post">
-   <input type="hidden" name="M" value="[% record.id %]">
+A typical form for updating or adding a record will look like
+
+  <form method="POST">
    First Name <input name="firstname" value="[% record.firstname %]"><br>
    Last Name  <input name="lasttname" value="[% record.lastname %]">
    <input type="submit">
@@ -1411,11 +1440,52 @@ A typical form will look like
 
 Usually there is no need to specify the C<action> of the
 form : the default action sent by the browser
-will be the same URL, and when the application
+will be the same URL (including the query parameter
+C<?A> or C<?M=[% record.Id %]>), and when the application
 receives a POST request, it knows it has 
-to update the record instead of displaying the form.
-The hidden field with name C<M> is needed to specify
-the key of the record to update.
+to update or add the record instead of displaying the form.
+This implies that you B<must> use the POST method for any data
+modification; forms for searching may use either GET or POST methods.
+
+For convenience, deletion through a GET url of shape
+C<?D=[% record.Id %]> is supported; however, 
+data modification through GET method is not recommanded,
+and therefore it is preferable to write
+
+  <form method="post">
+    <input name="D" value="[% record.Id %]">
+    <input type="submit" value="Delete this record">
+  </form>
+
+=head3 Searching
+
+A typical form for searching will look like
+
+  <form method="POST" action="[% self.url %]">
+     Search : 
+       <select name="S">
+         <option value="">--Choose in field1--</option>
+         <option value="+field1:val1">val1</option>
+         <option value="+field1:val2">val2</option>
+         ...
+       </select>
+       Other : <input name="S">
+   <input type="submit">
+  </form>
+
+So the form can combine several search criteria, all passed through the
+C<S> parameter. The form method can be either GET or POST; but if 
+you choose POST, then it is recommended that you also specify
+
+   action="[% self.url %]"
+
+instead of relying on the implicit self-url from the browser. 
+Otherwise the URL displayed in the browser may still contain
+some all criteria from a previous search, while the current
+form sends other search criteria --- the application will 
+not get confused, but the user might.
+
+
 
 
 =head1 CONFIGURATION FILE
@@ -1595,14 +1665,16 @@ Declares C<< field >> to be a I<user field>, which means that whenever
 a record is updated, the current username will be automatically
 inserted in that field.
 
-=item C<< autoNum <field>  >>
-
-Activates autonumbering for new records ; the number will be
-stored in the given field.
-
 =item C<< default <field> = <value> >>
 
 Default values for some fields ; will be inserted into new records.
+
+=item C<< autoNum <field>  >>
+
+Activates autonumbering for new records ; the number will be
+stored in the given field. Automatically implies that
+C<< default <field> = '#' >>.
+
 
 =back
 

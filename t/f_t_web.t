@@ -5,7 +5,7 @@ no warnings 'uninitialized';
 use CGI;
 use File::Copy;
 
-use Test::More tests => 11;
+use Test::More tests => 12;
 
 
 BEGIN {
@@ -50,7 +50,7 @@ like(response(""),
      qr[Welcome], 
      'homepage');
 
-my $search_all = response({S=>"*"});
+my $search_all = response("S=*");
 
 like($search_all,
      qr[<b>67</b> results found],
@@ -90,3 +90,7 @@ like(response("D=221"),
 like(response("S=221"), 
      qr[<b>0</b> results found],
      'check deleted');
+
+like(response("A=1"), 
+     qr[input name="Num" value="#"],
+     'add');

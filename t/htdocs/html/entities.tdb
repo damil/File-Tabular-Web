@@ -24,3 +24,7 @@ home   = _home.tt
 modif  = *
 delete = tst_file_tabular_web
 add    = tst_file_tabular_web
+
+[fields]
+autoNum Num
+default Num = "#"
