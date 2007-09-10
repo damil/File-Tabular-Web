@@ -198,7 +198,6 @@ sub after_delete {
     my $unlink_ok = unlink "$path";	
     my $msg = $unlink_ok ? "was suppressed" : "couldn't be suppressed ($!)";
     $self->{msg} .= "Attached file $path $msg<br>";
-    $self->after_delete_attachment($record, $path);
   }
 }
 
