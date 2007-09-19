@@ -474,6 +474,7 @@ sub can_do { # can be called from templates; $record is optional
   $allow ||= "*" if $action =~ /^(read|search|download)$/;
 
   for ($allow, $deny) {
+    $_ or next;                   # no acl list => nothing to do
     $_ = $self->user_match($_)    #    if acl list matches user name
        ||(   /\$(\S+)\b/i         # or if acl list contains a field name ...
 	  && defined($record)                   # ... and got a specific record
@@ -481,7 +482,7 @@ sub can_do { # can be called from templates; $record is optional
 	  && $self->user_match($record->{$1})); # ... and field content matches
   }
 
-  return $allow and not $deny;
+  return $allow && !$deny;
 }
 
 
