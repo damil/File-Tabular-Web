@@ -39,7 +39,7 @@ TO CHECK WHEN UPGRADING
 
 package File::Tabular::Web; # documentation at bottom of file
 
-our $VERSION = "0.12"; 
+our $VERSION = "0.13"; 
 
 use strict;
 use warnings;
@@ -204,6 +204,7 @@ sub app_initialize {
   $app->{tmpl} = Template->new({
     INCLUDE_PATH => \@tmpl_dirs,
     FILTERS      => $self->app_tmpl_filters,
+    EVAL_PERL    => 1,
    })
     or die Template->error;
 }
@@ -1689,11 +1690,19 @@ of attached documents).
 =head2 [template]
 
 This section specifies where to find templates for various views.
-The specified locations will be looked for either in the
-application directory, or in C<< <apache_dir>/lib/tmpl/ftw >>.
-
+The specified locations will be looked for in several directories:
+the application template directory (as specified by C<dir> directive, 
+see below), 
+the application directory,
+the default C<File::Tabular::Web> template directory
+(as specified by the C<app_tmpl_default_dir> method), 
+or the subdirectory C<default> of the above.
 
 =over
+
+=item dir
+
+specifies the application template directory
 
 =item short
 
@@ -1708,7 +1717,7 @@ for a detailed presentation of a single record ).
 =item modif
 
 Template for editing a record (typically this will be a form
-with an action to call the update URL (C<?U=key>).
+with an action to call the update URL (C<?M=key>).
 
 =item msg
 

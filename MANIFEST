@@ -1,5 +1,4 @@
 bin/ftw_new_app.pl
-Build.bat
 Build.PL
 Changes
 lib/File/Tabular/Web.pm
@@ -7,8 +6,6 @@ lib/File/Tabular/Web/Attachments.pm
 lib/File/Tabular/Web/Attachments/Indexed.pm
 MANIFEST
 META.yml			# Will be created by "make dist"
-pod2htmd.tmp
-pod2htmi.tmp
 README
 t/00-load.t
 t/f_t_web.t

@@ -1,5 +1,6 @@
 Revision history for File-Tabular-Web
 
-0.01    19.09.2007
-        First version.
+0.13    
+  - option EVAL_PERL => 1 for creating templates
+
 
