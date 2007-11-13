@@ -11,7 +11,6 @@
 
 
 package File::Tabular::Web::Attachments;
-
 use base 'File::Tabular::Web';
 use strict;
 use warnings;

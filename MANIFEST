@@ -24,5 +24,4 @@ t/htdocs/html/entities.tdb
 t/htdocs/html/entities.txt
 t/htdocs/html/entities_main.tt
 t/htdocs/html/entities_src.txt
-t/pod-coverage.t
 t/pod.t

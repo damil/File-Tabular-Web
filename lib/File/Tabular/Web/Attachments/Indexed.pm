@@ -6,7 +6,7 @@ use warnings;
 no warnings 'uninitialized';
 
 use Carp;
-
+use Search::Indexer;
 
 #----------------------------------------------------------------------
 sub app_initialize {
@@ -33,7 +33,8 @@ sub app_initialize {
 sub words_queried { 
 #----------------------------------------------------------------------
   my $self = shift;
-  return ("$self->{search_string_orig} $self{search_fulltext}" =~ m([\w/]+)g);
+  my $all_search = "$self->{search_string_orig} $self->{search_fulltext}";
+  return ($all_search =~ m([\w/]+)g);
 }
 
 
@@ -45,7 +46,7 @@ sub log_search {
 
   my $msg = sprintf "[%s][%s] $self->{user}", 
     $self->{search_string_orig},
-    $self->{search_fulltext},
+    $self->{search_fulltext};
   $self->{logger}->info($msg);
 }
 
@@ -68,7 +69,7 @@ sub before_search {
    );
 
   my $result = $self->{app}{indexer}
-                    ->search($search_fulltext, "implicit_plus");
+                    ->search($self->{search_fulltext}, "implicit_plus");
 
   # MAYBE add some logging here (time for fulltext search, #docs found)
 
@@ -84,7 +85,7 @@ sub before_search {
     # ASSUMES the document number is the record key, stored in firest field
     my $doc_ids       = join "|", keys %{$result->{scores}}
       or return;                # no scores, no results
-    $self->{search_string} = "~'^(?:$tmp)\\b'" 
+    $self->{search_string} = "~'^(?:$doc_ids)\\b'";
     $self->{search_string} .= " AND ($self->{search_string_orig})" 
       if $self->{search_string_orig};
   }
@@ -98,9 +99,9 @@ sub before_search {
 #----------------------------------------------------------------------
 sub search { # call parent search(), add fulltext scores into results
 #----------------------------------------------------------------------
-  my ($self) = @_;
+  my ($self, $search_string) = @_;
 
-  $self->SUPER::search;
+  $self->SUPER::search($search_string);
 
   my $fulltext_result = $self->{fulltext_result} or return;
 
@@ -108,7 +109,7 @@ sub search { # call parent search(), add fulltext scores into results
   $self->{data}->ht->add('score'); # new field for storing 'score'
 
   foreach my $record (@{$self->{results}{records}}) {
-    my $doc_id       = $record->{$self->{app}{ixDocNumField}};
+    my $doc_id       = $self->key($record);
     $record->{score} = $fulltext_result->{scores}{$doc_id};
   }
   $self->{orderBy} ||= "score : -num"; # default sorting by decreasing scores
@@ -140,19 +141,11 @@ sub add_excerpts { # add text excerpts from attached files
   my $regex = $self->{results}->{regex};
   foreach my $record (@{$self->{results}{records}}) {
     my $buf = $self->indexed_doc_content($record);
-    my $excerpts = $self->{indexer}->excerpts($buf, $regex);
+    my $excerpts = $self->{app}{indexer}->excerpts($buf, $regex);
     $record->{excerpts} = join(' / ', @$excerpts);
   }
 }
 
-
-
-#----------------------------------------------------------------------
-sub indexed_doc_content { # returns plain text representation of the doc.
-#----------------------------------------------------------------------
-  my ($self, $record) = @_;
-  die 'Method "indexed_doc_content" should be redefined in your subclass';
-}
 
 
 #----------------------------------------------------------------------
@@ -178,7 +171,7 @@ sub after_add_attachment {
 
   if ($field eq $self->{app}{indexed_field}) {
     my $buf  = $self->indexed_doc_content($record);
-    delete self->{app}{indexer};
+    delete $self->{app}{indexer};
     my $indexer = Search::Indexer->new(dir       => $self->{app}{dir},
                                        writeMode => 1);
     $indexer->add($self->key($record), $buf);
@@ -191,7 +184,7 @@ sub before_delete_attachment {
   my ($self, $record, $field, $path) = @_;
 
   if ($field eq $self->{app}{indexed_field}) {
-    delete self->{app}{indexer};
+    delete $self->{app}{indexer};
     my $indexer = Search::Indexer->new(dir       => $self->{app}{dir},
                                        writeMode => 1);
     $indexer->remove($self->key($record));
@@ -205,7 +198,8 @@ sub indexed_doc_content {
   my ($self, $record) = @_;
 
   # this is the default implementation, MOST PROBABLY INADEQUATE
-  # should be overridden in subclasses
+  # should be overridden in subclasses to perform appropriate
+  # conversions from Html, Pdf, Word, etc.
 
   my $path = $self->upload_fullpath($record, $self->{indexed_field});
   open my $fh, $path or die "open $path: $!";

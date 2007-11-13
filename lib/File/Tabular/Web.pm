@@ -39,7 +39,7 @@ TO CHECK WHEN UPGRADING
 
 package File::Tabular::Web; # documentation at bottom of file
 
-our $VERSION = "0.13"; 
+our $VERSION = "0.14"; 
 
 use strict;
 use warnings;
@@ -587,9 +587,9 @@ sub search_key { # search by record key
 
   my ($records, $lineNumbers) = $self->{data}->fetchall(where => $query);
   my $count = @$records;
-  $self->{results} = {count       => $count, 
-		      records     => $records, 
-		      lineNumbers => $lineNumbers};
+  $self->{results}{count}       = $count;
+  $self->{results}{records}     = $records;
+  $self->{results}{lineNumbers} = $lineNumbers;
 }
 
 
@@ -607,9 +607,9 @@ sub search { # search records and display results
   $self->before_search;
   $self->log_search;
 
-  $self->{results} = {count       => 0, 
-		      records     => [], 
-		      lineNumbers => []};
+  $self->{results}{count}       = 0;
+  $self->{results}{records}     = [];
+  $self->{results}{lineNumbers} = [];
 
   return if $self->{search_string} =~ /^\s*$/; # no query, no results
 
