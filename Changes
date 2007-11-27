@@ -1,5 +1,9 @@
 Revision history for File-Tabular-Web
 
+0.15
+  - removed unused method "prepare_update"
+  - initialization of special fields in "app_initialize"
+
 0.14
   - nombreux bug fixes dans Attachments/Indexed.pm
   - include all modules in t/00_load.t

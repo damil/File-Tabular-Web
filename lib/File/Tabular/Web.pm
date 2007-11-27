@@ -1,3 +1,4 @@
+
 =begin comment
 
 TODO 
@@ -21,11 +22,7 @@ TO CHECK WHEN UPGRADING
 
   - permissions, esp. permission to add/modif (see Jetons PH)
  - 'add' permission without 'modif' 
-  - Minutes, links to getDecis, links F=...
-  - Minutes , specify class
-  - force views in Minutes (short, edit, etc.)
   - remove HTTP header from templates
-  - using groups in permissions
   - remove calls to [% self.url('foobar') %]
   - replace [fixed]tmpl_dir by [template]dir
 
@@ -39,7 +36,7 @@ TO CHECK WHEN UPGRADING
 
 package File::Tabular::Web; # documentation at bottom of file
 
-our $VERSION = "0.14"; 
+our $VERSION = "0.15"; 
 
 use strict;
 use warnings;
@@ -137,10 +134,6 @@ sub _app_new { # creates a new application hashref (not an object)
   };
   $app->{class} ||= $class; # default if not specified in config
 
-  # special fields
-  $app->{time_fields} = $app->{cfg}->get('fields_time');
-  $app->{user_field}  = $app->{cfg}->get('fields_user');
-
   return $app;
 }
 
@@ -207,6 +200,10 @@ sub app_initialize {
     EVAL_PERL    => 1,
    })
     or die Template->error;
+
+   # special fields : time of last modif, author of last modif
+  $app->{time_fields} = $app->{cfg}->get('fields_time');
+  $app->{user_field}  = $app->{cfg}->get('fields_user');
 }
 
 
@@ -429,7 +426,7 @@ sub open_data { # open File::Tabular object on data file
 
 
 #----------------------------------------------------------------------
-sub param { # always returns a scalar value 
+sub param { 
 #----------------------------------------------------------------------
   my ($self, $param_name) = @_; # $param_name might be undef
 
@@ -450,7 +447,7 @@ sub param { # always returns a scalar value
   my $val = $self->{cfg}->get("fixed_$param_name");
   return $val if $val;
 
-  # then check in parameters to this request
+  # then check in parameters to this request (flattened into a scalar)
   if (@vals) {
     $val = join(' ', @vals);    # join multiple values
     $val =~ s/^\s+//;           # remove initial spaces
@@ -777,21 +774,6 @@ sub empty_record { # to be displayed in "modif" view (when adding)
 }
 
 
-
-#----------------------------------------------------------------------
-sub prepare_update { 
-#----------------------------------------------------------------------
-  my ($self, $update_arg) = @_;
-  my $autonum_char = $self->{data}{autoNumChar};
-  if ($update_arg =~ /$autonum_char/) { # adding new record
-    $self->empty_record;
-  }
-  else {
-     $self->search_key($update_arg);
-  }
-}
-
-
 #----------------------------------------------------------------------
 sub update {
 #----------------------------------------------------------------------
@@ -974,17 +956,50 @@ __END__
 
 File::Tabular::Web - turn a tabular file into a web application
 
-=head1 INTRODUCTION
+=head1 SYNOPSIS
+
+=over
+
+=item configure the http server (here with modperl)
+
+  <LocationMatch "\.ftw$">
+    SetHandler modperl
+    PerlResponseHandler File::Tabular::Web
+  </LocationMatch>
+
+=item generate a CRUD application for one tabular file (scaffolding)
+
+  cp some/data.txt /path/to/http/htdocs/some/data.txt
+  perl ftw_new_app.pl /path/to/http/htdocs/some/data.txt
+
+=item use the application
+
+  http://myServer/some/data.ftw
+
+=item customize
+
+  # change some configuration options
+  edit /path/to/http/htdocs/some/data.ftw 
+  
+  # change the views
+  edit /path/to/http/htdocs/some/{data_short.tt,data_long.tt,data_edit.tt}
+
+=back
+
+=head1 DESCRIPTION
+
+=head2 Introduction
 
 This is a simple Apache web application framework based on
 L<File::Tabular|File::Tabular> and
 L<Search::QueryParser|Search::QueryParser>.  The framework offers
 builtin services for searching, displaying and updating a flat tabular
 datafile, possibly with attached documents (see
-L<File::Tabular::Web::Attachments|File::Tabular::Web::Attachments>).
+L<File::Tabular::Web::Attachments|File::Tabular::Web::Attachments> and 
+L<File::Tabular::Web::Attachments::Indexed|File::Tabular::Web::Attachments::Indexed>).
 
 The strong point of C<File::Tabular::Web> is that it is built
-around a powerful search engine, designed from the start for Web 
+around a search engine designed from the start for Web 
 requests : by default it searches for complete words, spanning
 all data fields. However, you can easily write queries that
 look in specific fields, using regular expressions, boolean
@@ -1266,27 +1281,29 @@ in detail through the C<long> view.
 
 =head3 M
 
+  http://myServer/some/app.ftw?M=key
+
 If called with method GET, finds the record with the given key and 
 displays it through the
 C<modif> view (typically this view will be an HTML form).
-
-  http://myServer/some/app.ftw?M=key
 
 If called with method POST, 
 finds the record with the given key
 and updates it with given field names and values.
 After update, displays an update message through the C<msg> view.
-The form should contain a hidden field with name C<M>
-whose value is the id of the record to update.
 
 =head3 A
 
   http://myServer/some/app.ftw?A
 
-Displays a form for creating a new record, through the 
+If called with method GET, displays a form for creating 
+a new record, through the 
 C<modif> view. Fields may be pre-filled by default values
 given in the configuration file.
 
+If called with method POST, 
+creates a new record, with values given by the submitted form.
+After record creation, displays an update message through the C<msg> view.
 
 =head3 D
 
@@ -1447,11 +1464,11 @@ C<?A> or C<?M=[% record.Id %]>), and when the application
 receives a POST request, it knows it has 
 to update or add the record instead of displaying the form.
 This implies that you B<must> use the POST method for any data
-modification; forms for searching may use either GET or POST methods.
+modification; whereas forms for searching may use either GET or POST methods.
 
 For convenience, deletion through a GET url of shape
 C<?D=[% record.Id %]> is supported; however, 
-data modification through GET method is not recommanded,
+data modification through GET method is not recommended,
 and therefore it is preferable to write
 
   <form method="post">
@@ -1492,8 +1509,20 @@ not get confused, but the user might.
 
 =head1 CONFIGURATION FILE
 
-The configuration file will be parsed by L<Appconfig|Appconfig>.
-This file format supports comments (starting with C<#>), 
+The configuration file is always stored within the C<htdocs>
+directory, at the location corresponding to the application
+URL : so for application F<http://myServer/some/data.ftw>,
+the configuration file is in 
+
+    /path/to/http/htdocs/some/data.ftw
+
+Because of the Apache configuration directives described above,
+the URL is always served by C<File::Tabular::Web>, so there
+is no risk of users seing the content of the configuration
+file.
+
+The configuration is written in L<Appconfig|Appconfig> format.
+This format supports comments (starting with C<#>), 
 continuation lines (through final C<\>), "heredoc" quoting
 style for multiline values, and section headers similar
 to a Windows INI file. All details about the configuration
@@ -1541,10 +1570,10 @@ will be treated as
   ?S=*&count=50&orderBy=lastname
 
 
-Relevant parameters to put in these sections
-are for example the 
-C<count>, C<orderBy>, etc. parameters described
-in section L</S>.
+Relevant parameters to put in C<fixed> or in C<default>
+are described in section L</S> of this documentation :
+for example C<count>, C<orderBy>, etc.
+
 
 =head2 [application]
 
@@ -1682,7 +1711,7 @@ C<< default <field> = '#' >>.
 
 
 Subclasses may add more entries in this section
-(for example for specifying fields holding names
+(for example for specifying fields that will hold names
 of attached documents).
 
 
@@ -1880,18 +1909,35 @@ to detect changes and invalidate the cache.
 
 =head3 param
 
+  [% self.param %]
+
+With no argument, returns the list of parameter names 
+to the current HTTP request. 
+
   [% self.param(param_name) %]
 
-Returns the value that was specified under C<$param_name> in the
+With an argument, 
+returns the value that was specified under C<$param_name> in the
 HTTP request, or in the configuration file (see the 
 description of C<< [fixed]/[default] >> sections).
-
-If C<param_name> is given, the return value is always a scalar; in
-case of multiple HTTP values, they are joined with a space. Initial
+The return value is always a scalar
+(so this is I<not exactly the same> as calling 
+C<< cgi.param(...) >>). If the HTTP request contains
+multiple values under the same name, these values
+are joined with a space. Initial
 and trailing spaces are automatically removed.
 
-With no argument, the method returns the list of parameter
-names received by this request.
+If you need to access the list of values in the HTTP request,
+you can always call 
+
+  [% self.cgi.param(param_name) %]
+
+or 
+
+  [% self.APR_request.param(param_name) %]
+
+(whichever is appropriate).
+
 
 =head3 can_do
 
@@ -1900,7 +1946,7 @@ names received by this request.
 Tells whether the current user has permission to do 
 C<$action> (which might be 'modif', 'delete', etc.).
 See explanations above about how permissions are specified
-in the initialisation file.
+in the initialization file.
 Sometimes permissions are setup in a record-specific way
 (for example one data field may contain the names of 
 authorized users); the second optional argument 
@@ -1973,16 +2019,12 @@ Generates an empty record (preparation for adding
 a new record). Fields are filled with default values
 specified in the configuration file.
 
-=head3 prepare_update
-
-Fetches the record to update, or builds an empty
-record, according to the argument to the update request.
 
 =head3 update
 
 Checks for permission and then performs the update.
 Most probably you don't want to override this
-method, but rather C<before_update> or C<after_update>.
+method, but rather the methods C<before_update> or C<after_update>.
 
 =head3 before_update
 
@@ -2007,7 +2049,7 @@ for example for attached documents).
 
 Checks for permission and then performs the delete.
 Most probably you don't want to override this
-method, but rather C<before_delete> or C<after_delete>.
+method, but rather the methods C<before_delete> or C<after_delete>.
 
 =head3 before_delete
 

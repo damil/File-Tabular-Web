@@ -7,6 +7,7 @@ no warnings 'uninitialized';
 
 use Carp;
 use Search::Indexer;
+use locale;
 
 #----------------------------------------------------------------------
 sub app_initialize {
@@ -225,15 +226,23 @@ This abstract class adds support for
 fulltext indexing in documents attached to a
 L<File::Tabular::Web|File::Tabular::Web> application.
 
-Most probably you should write a subclass that redefines the 
-L</indexed_doc_content> method (for translating
-the content of the attached document to plain text).
-The default implementation just returns the raw file content,
-but this is I<most probably inadequate> : if the attached
-file is in binary format (like a C<.doc> document), or
-even in HTML, some translation process must be programmed,
-and cannot be guessed by the present framework.
+Queries into the fulltext index should be passed under the
+C<SFT> ("search full text") parameter, in addition to the 
+usual C<S> parameter (search in metadata record). So for
+example
 
+  http://my/app.ftw?S=2007&SFT=perl
+
+will search records containing the word "2007" and having an attached
+document in which there is the word "perl". Queries can of course be
+much more complex, with boolean operators, parentheses, excluded words, etc.
+--- see L<Search::Indexer> and L<Query::Parser>.
+
+
+Indexing requires some mechanism to convert attached documents 
+into plain text. This cannot be guessed by the present class,
+so you should write a subclass that implements such
+conversions; see the L</SUBCLASSING> section below.
 
 =head1 RESERVED FIELD NAMES
 
@@ -254,13 +263,93 @@ as regular fields in the data file.
 Currently only one single upload field can be indexed
 within a given application.
 
+=head2 subclassing
+
+This class relies on the L</indexed_doc_content> method 
+for converting attached documents into plain text, which
+is a prerequisite to perform the indexing. The default
+implementation of L</indexed_doc_content> just returns 
+the raw file content, so it is most likely inappropriate
+to suit your needs; therefore you should write a subclass
+that overrides this method, and then associate this subclass
+to your application within the configuration file :
+
+  [application]
+  class = My::Subclass::Of::File::Tabular::Web::Attachements::Indexed
+
+
+=head2 Asynchronous indexing
+
+If your uploaded documents are Microsoft Office or OpenOffice
+documents, it may be too costly to convert them on the fly, while
+answering the HTTP request. A way to deal with this is to 
+override the L</after_add_attachment> and 
+L</before_delete_attachment> methods : instead of 
+performing immediate adds or deletions into the index, 
+these method can write indexing requests into an event queue.
+A separate process then reads the event queue and 
+performs the indexing operations.
+
+
 =head1 METHODS
 
-=head1 SUBCLASSING
+=head2 app_initialize
+
+Calls the L<parent method|File::Tabular::Web::Attachments/app_initialize>;
+records in C<< $self->{app}{indexed_field} >> which is the name
+of the indexed field.
+
+=head2 words_queried
+
+Returns a list of words queried either in the C<S> or C<SFT> parameters.
+
+=head2 log_search
+
+Logs both the C<S> and C<SFT> parameters.
+
+=head2 before_search
+
+Performs the fulltext search, and combines the results
+into the usual search string coming from the C<S> parameter.
+
+=head2 search
+
+Calls the L<parent method|File::Tabular::Web/search>
+and adds a C<score> field into each record.
+
+
+=head2 sort_and_slice
+
+Calls the L<parent method|File::Tabular::Web/sort_and_slice>
+and adds excerpts of the searched words from attached documents
+into each record of the slice.
+
+=head2 add_excerpts
+
+Implementation to find excerpts of searched word within 
+attached documents and add them into the result set.
+
+=head2 params_for_next_slice
+
+Returns a string repeating the search parameters, for
+generating URLs to the next or previous slice.
+
+=head2 after_add_attachment
+
+Performs the indexing of the attached document
+
+=head2 before_delete_attachment
+
+Removes the document from the index.
+
 
 =head2 indexed_doc_content
 
+  my $plain_text = $self->indexed_doc_content($record);
 
-=cut
+Returns the plain text representation of the document attached
+to C<$record>. To get to the actual file, your implementation 
+can access 
 
+  my $path = $self->upload_fullpath($record, $self->{indexed_field});
 

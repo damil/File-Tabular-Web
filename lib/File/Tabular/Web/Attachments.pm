@@ -91,8 +91,9 @@ sub do_upload_file { #
   if ($self->{modperl}) {
     require Apache2::Request;
     require Apache2::Upload;
-    my $req = Apache2::Request->new($self->{modperl});
-    $src_fh = $req->upload($field)->fh;
+    my $req  = Apache2::Request->new($self->{modperl});
+    my $upld = $req->upload($field) or die "no upload object for field $field";
+    $src_fh = $upld->fh;
   }
   else {
     my @upld_fh = $self->{cgi}->upload($field); # may be an array 
@@ -285,7 +286,7 @@ When updating a record with attached files,
 files are first transfered to temporary locations by the 
 L</before_update> method.
 Then the main record is updated as usual through the 
-L<File::Tabular::Web/update|parent method>.
+L<parent method|File::Tabular::Web/update>.
 Finally, files are renamed to their final location
 by the L</after_update> method.
 If the update operation failed, files are destroyed
@@ -308,9 +309,39 @@ to be upload fields.
 
 =head1 WRITING TEMPLATES
 
-  - downloading files : just relative URL
-  - uploading files : don't remember multipart-data
+=head2 Downloading attachments
 
+To link to an attached file, use the L</download> method :
+
+  [% FOREACH record IN found.records %]
+    <A HREF="[% self.download(record, 'AttachedField') %]">
+       download document [%- record.AttachedField -%]
+    </A>
+    <HR>
+  [% END # FOREACH %]
+
+=head2 Uploading attachments
+
+To upload an attachment, use a input element of type C<FILE>,
+within an HTML form encoded as C<multipart/form-data>. Since
+HTML file input elements cannot have an initial value, it 
+may be a good practice to indicate if an attachment is already
+present in this field and if so, insert a download link :
+
+  [% SET record = found.records.0 %]
+  <FORM METHOD="POST" ENCTYPE="MULTIPART/FORM-DATA">
+    <INPUT NAME="Field1" VALUE="[% record.Field1 | html %]"><br>
+    <INPUT NAME="Field2" VALUE="[% record.Field2 | html %]"><br>
+    ..
+    <INPUT NAME="AttachedField1" TYPE="FILE">
+      [%- IF record.AttachedField1; # if an attachment is already present  -%]
+       (current attachment :
+        <A HREF="[% self.download(record, 'AttachedField1') %]">
+         [%- record.AttachedField1 -%]
+        </A>)
+
+    ...
+  </FORM>
 
 
 =head1 METHODS
@@ -325,19 +356,19 @@ C<< $self->{app}{upload_fields} >>.
 
 =head2 open_data
 
-Calls the L<File::Tabular::Web/open_data|parent method>.
+Calls the L<parent method|File::Tabular::Web/open_data>.
 In addition, checks that fields declared as upload
 fields are really present in the data.
 
 =head2 before_update
 
-Calls the L<File::Tabular::Web/before_update|parent method>.
-In addition, uploads submitted files to a temporary name in the application 
-directory.
+Calls the L<parent method|File::Tabular::Web/before_update>.
+In addition, uploads submitted files to a temporary location
+in the application directory.
 
 =head2 after_update
 
-Calls the L<File::Tabular::Web/after_update|parent method>,
+Calls the L<parent method|File::Tabular::Web/after_update>,
 then renames the uploaded files to their final location.
 
 =head2 rollback_update
@@ -347,7 +378,7 @@ Unlinks the uploaded files.
 
 =head2 after_delete
 
-Calls the L<File::Tabular::Web/after_delete|parent method>,
+Calls the L<parent method|File::Tabular::Web/after_delete>,
 then suppresses files attached to the deleted record.
 
 
@@ -390,7 +421,7 @@ This behaviour may be redefined in subclasses.
 Returns a full pathname to the attached document.
 This is the location where the file is stored on the server.
 The default value is the concatenation of 
-C<< $self->{app}{dir} >> and << $self->upload_path($record, $field) >>.
+C<< $self->{app}{dir} >> and C<< $self->upload_path($record, $field) >>.
 
 
 
@@ -402,9 +433,9 @@ Returns an url to the attached document, relative
 to the application url. So it can be used in templates
 as follows
 
-  [% IF record.$fieldname %]
-    <a href="[% self.download(record, fieldname) %]">
-       Attached document : [% record.$fieldname %]
+  [% IF record.fieldname %]
+    <a href="[% self.download(record, 'fieldname') %]">
+       Attached document : [% record.fieldname %]
     </a>
   [% END; # IF %]
 
@@ -412,11 +443,23 @@ as follows
 
 =head2 hooks before / after adding or deleting attachments
 
-  $self->after_add_attachment$record, $field, $path)
-  $self->before_delete_attachment$record, $field, $path)
+  $self->after_add_attachment($record, $field, $path)
+  $self->before_delete_attachment($record, $field, $path)
 
 These methods are called each time an attachment is
-added or deleted. The default implementation is empty
+added or deleted. The default implementation is empty.
 Subclasses may add code for example for converting the file
-or indexing it.
+or indexing it (see L<File::Tabular::Web::Attachments::Indexed>).
 
+
+
+=head1 AUTHOR
+
+Laurent Dami, C<< <laurent.d...@justice.ge.ch> >>
+
+=head1 COPYRIGHT & LICENSE
+
+Copyright 2007 Laurent Dami, all rights reserved.
+
+This program is free software; you can redistribute it and/or modify it
+under the same terms as Perl itself.
