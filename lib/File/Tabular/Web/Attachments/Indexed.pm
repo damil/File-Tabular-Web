@@ -7,6 +7,7 @@ no warnings 'uninitialized';
 
 use Carp;
 use Search::Indexer;
+use Search::QueryParser 0.92;
 use locale;
 
 #----------------------------------------------------------------------
@@ -83,10 +84,10 @@ sub before_search {
     # will require more clever handling in File::Tabular::compile_query 
     # using some kind of representation for sets of integers (bit vectors
     # or Set::IntSpan::Fast)
-    # ASSUMES the document number is the record key, stored in firest field
-    my $doc_ids       = join "|", keys %{$result->{scores}}
+    # ASSUMES the document number is the record key, stored in first field
+    my $doc_ids       = join ",", keys %{$result->{scores}}
       or return;                # no scores, no results
-    $self->{search_string} = "~'^(?:$doc_ids)\\b'";
+    $self->{search_string} = "#$doc_ids";
     $self->{search_string} .= " AND ($self->{search_string_orig})" 
       if $self->{search_string_orig};
   }

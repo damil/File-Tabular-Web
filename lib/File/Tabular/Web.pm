@@ -49,7 +49,7 @@ use POSIX 'strftime';
 use List::Util      qw/min/;
 use List::MoreUtils qw/uniq any all/;
 use AppConfig       qw/:argcount/;
-use File::Tabular;
+use File::Tabular 0.71;
 use Search::QueryParser;
 
 

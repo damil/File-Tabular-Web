@@ -1,5 +1,8 @@
 Revision history for File-Tabular-Web
 
+0.16
+  - Indexed.pm : use bit vectors to merge fulltext with metadata
+
 0.15
   - removed unused method "prepare_update"
   - initialization of special fields in "app_initialize"
