@@ -1,42 +1,6 @@
-
-=begin comment
-
-TODO 
-
- - check completeness of logging code
- - simplify app_init for Template->new
- - how to remove an attached document
- - system to control headers
- - automatically set expire header if modify is enabled
- - create logger in new() + use Time::HiRes
- - server-side record validation using "F::T where syntax" (f1 > val, etc.)
-    or using code hook
- - more clever generation of wordsQueried in search
- - options qw/preMatch postMatch avoidMatchKey fieldSep recordSep/
-    should be in a specific section
- - make compatibility with modperl1
- - dynamic menus presenting all possible values (like Excel automatic filter)
-
-
-TO CHECK WHEN UPGRADING
-
-  - permissions, esp. permission to add/modif (see Jetons PH)
- - 'add' permission without 'modif' 
-  - remove HTTP header from templates
-  - remove calls to [% self.url('foobar') %]
-  - replace [fixed]tmpl_dir by [template]dir
-
-  - config : autoNum and not autonum
-
-=end comment
-
-=cut
-
-
-
 package File::Tabular::Web; # documentation at bottom of file
 
-our $VERSION = "0.15"; 
+our $VERSION = "0.17"; 
 
 use strict;
 use warnings;
@@ -220,8 +184,29 @@ sub app_tmpl_default_dir { # default; override in subclasses
 sub app_tmpl_filters { # default; override in subclasses
 #----------------------------------------------------------------------
   my ($self) = @_;
+  my $cfg = $self->{app}{cfg};
+  my $ini_marker = $cfg->get('preMatch');
+  my $end_marker = $cfg->get('postMatch');
 
-  return {}; # empty record; 
+  # no highlight filters without pre/postMatch
+  $ini_marker && $end_marker or return {}; 
+
+  my $HL_class   = $cfg->get('highlightClass') || "HL";
+  my $regex      = qr/\Q$ini_marker\E(.*?)\Q$end_marker\E/s;
+
+  my $filters = {
+    highlight => sub {
+      my $text = shift;
+      $text =~ s[$regex][<span class="$HL_class">$1</span>]g;
+      return $text;
+    },
+    unhighlight => sub {
+      my $text = shift;
+      $text =~ s[$regex][$1]g;
+      return $text;
+    }
+   };
+  return $filters;
 }
 
 
@@ -1008,14 +993,14 @@ So if you are looking for simplicity and speed of development,
 rather than speed of execution, then you may have found a convenient
 tool. 
 
-We used it intensively in our Intranet for managing 
+We use it intensively in our Intranet for managing 
 lists of people, rooms, meetings, internet pointers, etc., and even
 for more sensitive information like lists of payments or 
 the archived judgements (minutes) of Geneva courts.
 Of course this is slower that a real database, 
 but for data up to 10MB/50000 records, the difference
 is hardly noticeable. On the other side, ease of
-development and deployment, ease of importing/exporting
+development and deployment and ease of importing/exporting
 data proved to be highly valuable assets.
 
 
@@ -1504,7 +1489,23 @@ some all criteria from a previous search, while the current
 form sends other search criteria --- the application will 
 not get confused, but the user might.
 
+=head2 Highlighting the searched words
 
+The C<preMatch> and C<postMatch> parameters 
+in the configuration file (see below) define some
+marker strings that will be automatically inserted 
+in the data returned by a search, surrounding each word
+that was mentioned in the query. These marker strings 
+should be chosen so that they would unlikely mix with 
+regular data or with HTML markup : the recommanded
+values are 
+
+  preMatch  {[
+  postMatch ]}
+
+Then you can exploit that marking within your templates
+by calling the L</highlight> and L</unhighlight> 
+template filters, described below.
 
 
 =head1 CONFIGURATION FILE
@@ -1542,7 +1543,8 @@ The global section may also contain some
 options to L<File::Tabular/new> :
 C<preMatch>, C<postMatch>, C<avoidMatchKey>, C<fieldSep>, C<recordSep>.
 
-
+Option C<highlightClass> defines the class name
+used by the L</highlight> filter (default is C<HL>).
 
 
 =head2 [fixed] / [default]
@@ -1834,7 +1836,51 @@ The default is C<< <server_root>/lib/tmpl/ftw >>.
 
 Returns a hashref of filters to be passed to 
 the Template object (see L<Template::Filters>).
-Empty by default.
+
+The default contains two filters, which work together
+with the C<preMatch> and C<postMatch> parameters of the
+configuration file. Suppose the following configuration :
+
+  preMatch  {[
+  postMatch ]}
+
+Then the filters are defined as follows :
+
+=over
+
+=item highlight
+
+Replaces strings of shape C<< {[...[} >> by 
+C<< <span class="HL">...</span> >>.
+
+The class name is C<HL> by default, but another name can be
+defined through the C<highlightClass> configuration parameter.
+Templates have to define a style for that class, like for 
+example 
+
+  <style>
+    .HL {background: lightblue}
+  </style>
+
+
+=item unhighlight
+
+Replaces strings of shape C<< {[...[} >> by 
+C<< ... >> (i.e. removes the marking).
+
+=back
+
+These filters are intended to help 
+highlighting the words matched by a search request ; 
+usually this must happen I<after> the data has been
+filtered for HTML entities. So a typical use
+in a template would be for example 
+
+  <a href="/some/url?with=[% record.foo | unhighlight | uri %]">
+      link to [% record.foo | html | highlight %]
+  </a>
+
+
 
 =head3 app_phases_definition
 
@@ -2108,6 +2154,34 @@ This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself.
 
 
+
+=begin comment
+
+TODO 
+
+ - check completeness of logging code
+ - simplify app_init for Template->new
+ - how to remove an attached document
+ - system to control headers
+ - automatically set expire header if modify is enabled
+ - create logger in new() + use Time::HiRes
+ - server-side record validation using "F::T where syntax" (f1 > val, etc.)
+    or using code hook
+ - more clever generation of wordsQueried in search
+ - options qw/preMatch postMatch avoidMatchKey fieldSep recordSep/
+    should be in a specific section
+ - make compatibility with modperl1
+ - dynamic menus presenting all possible values (like Excel automatic filter)
+
+
+TO CHECK WHEN UPGRADING
+
+  - permissions, esp. permission to add/modif (see Jetons PH)
+ - 'add' permission without 'modif' 
+  - remove calls to [% self.url('foobar') %]
+  - config : autoNum and not autonum
+
+=end comment
 
 
 

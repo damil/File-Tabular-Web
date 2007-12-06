@@ -14,13 +14,7 @@ t/htdocs/html/_long.tt
 t/htdocs/html/_modif.tt
 t/htdocs/html/_msg.tt
 t/htdocs/html/_short.tt
-t/htdocs/html/bck/entities_home.tt
-t/htdocs/html/bck/entities_long.tt
-t/htdocs/html/bck/entities_main.tt
-t/htdocs/html/bck/entities_modif.tt
-t/htdocs/html/bck/entities_msg.tt
-t/htdocs/html/bck/entities_short.tt
-t/htdocs/html/entities.tdb
+t/htdocs/html/entities.ftw
 t/htdocs/html/entities.txt
 t/htdocs/html/entities_main.tt
 t/htdocs/html/entities_src.txt

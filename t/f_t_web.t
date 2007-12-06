@@ -21,7 +21,7 @@ copy("$DIR/htdocs/html/entities_src.txt", "$DIR/htdocs/html/entities.txt")
   or die "copy: $!";
 
 # setup environment for CGI
-my $url = "html/entities.tdb";
+my $url = "html/entities.ftw";
 $ENV{PATH_INFO}       = $url;
 $ENV{PATH_TRANSLATED} = "$DIR/htdocs/$url";
 $ENV{DOCUMENT_ROOT}   = "$DIR/htdocs";

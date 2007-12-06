@@ -1,5 +1,8 @@
 Revision history for File-Tabular-Web
 
+0.17 06.12.2007
+  - First CPAN release
+
 0.16
   - Indexed.pm : use bit vectors to merge fulltext with metadata
 
