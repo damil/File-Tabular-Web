@@ -1,5 +1,8 @@
 Revision history for File-Tabular-Web
 
+0.18 09.12.2007
+  - Fixes in tests in order to pass CPAN testers  
+
 0.17 06.12.2007
   - First CPAN release
 

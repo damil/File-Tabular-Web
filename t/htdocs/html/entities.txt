@@ -33,6 +33,7 @@ Num|Name|Char|Description
 219|Ucirc|Û|capital U, circumflex accent
 217|Ugrave|Ù|capital U, grave accent
 220|Uuml|Ü|capital U, dieresis or umlaut mark
+221|Yacute|Ý|capital Y, acute accent
 225|aacute|á|small a, acute accent
 226|acirc|â|small a, circumflex accent
 230|aelig|æ|small ae diphthong (ligature)

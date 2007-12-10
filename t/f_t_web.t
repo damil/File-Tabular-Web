@@ -9,16 +9,11 @@ use Test::More tests => 12;
 
 
 BEGIN {
-#  use lib "../lib";
   use_ok( 'File::Tabular::Web' );
 }
 
 my $DIR = "t";
-# my $DIR = ".";
 
-# get a fresh copy of the data file
-copy("$DIR/htdocs/html/entities_src.txt", "$DIR/htdocs/html/entities.txt")
-  or die "copy: $!";
 
 # setup environment for CGI
 my $url = "html/entities.ftw";
@@ -76,21 +71,36 @@ like(response("M=221"),
      qr[<input name="Name" value="Yacute">],
      'modify');
 
-{
-  local $ENV{REQUEST_METHOD}  = "POST";
-  like(response({M => 221}), 
-       qr[Updated.*221],
-       'update');
+
+
+SKIP : {
+
+
+  # get a fresh copy of the data file
+  copy("$DIR/htdocs/html/entities_src.txt", "$DIR/htdocs/html/entities.txt")
+    or skip "cannot copy data file", 4;
+
+  {
+    local $ENV{REQUEST_METHOD}  = "POST";
+    like(response({M => 221}), 
+         qr[Updated.*221],
+         'update');
+  }
+
+  like(response("D=221"), 
+       qr[Deleted.*221],
+       'delete');
+
+  like(response("S=221"), 
+       qr[<b>0</b> results found],
+       'check deleted');
+
+  like(response("A=1"), 
+       qr[input name="Num" value="#"],
+       'add');
+
+  # restore to initial state for next run of tests
+  copy("$DIR/htdocs/html/entities_src.txt", "$DIR/htdocs/html/entities.txt")
 }
 
-like(response("D=221"), 
-     qr[Deleted.*221],
-     'delete');
 
-like(response("S=221"), 
-     qr[<b>0</b> results found],
-     'check deleted');
-
-like(response("A=1"), 
-     qr[input name="Num" value="#"],
-     'add');
