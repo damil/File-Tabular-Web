@@ -1,5 +1,9 @@
 Revision history for File-Tabular-Web
 
+0.19 04.03.2011 remlawim
+  - override template toolkit's failsafe counter for while loops
+    in case of download action
+
 0.18 09.12.2007
   - Fixes in tests in order to pass CPAN testers  
 
