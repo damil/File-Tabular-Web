@@ -324,7 +324,7 @@ To link to an attached file, use the L</download> method :
 
 To upload an attachment, use a input element of type C<FILE>,
 within an HTML form encoded as C<multipart/form-data>. Since
-HTML file input elements cannot have an initial value, it 
+HTML file input elements cannot have an initial value, it
 may be a good practice to indicate if an attachment is already
 present in this field and if so, insert a download link :
 
@@ -348,9 +348,9 @@ present in this field and if so, insert a download link :
 
 =head2 app_initialize
 
-Calls the L<File::Tabular::Web/app_initialize|parent method>.
+Calls the L<parent method|File::Tabular::Web/app_initialize>.
 In addition, parses the C<upload> variable in C<< [fields] >> section,
-putting the result in the hash ref 
+putting the result in the hash ref
 C<< $self->{app}{upload_fields} >>.
 
 
