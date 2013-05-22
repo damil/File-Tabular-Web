@@ -1,6 +1,6 @@
 package File::Tabular::Web; # documentation at bottom of file
 
-our $VERSION = "0.19"; 
+our $VERSION = "0.20"; 
 
 use strict;
 use warnings;

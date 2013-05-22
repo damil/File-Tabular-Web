@@ -1,5 +1,8 @@
 Revision history for File-Tabular-Web
 
+0.20
+  - fix old documentation bug, detected by new Pod::Simple
+
 0.19 04.03.2011 remlawim
   - override template toolkit's failsafe counter for while loops
     in case of download action
