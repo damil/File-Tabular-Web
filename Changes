@@ -1,5 +1,8 @@
 Revision history for File-Tabular-Web
 
+0.21
+  - added support for FastCGI mode
+  
 0.20
   - fix old documentation bug, detected by new Pod::Simple
 
