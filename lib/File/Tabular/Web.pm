@@ -1,6 +1,6 @@
 package File::Tabular::Web; # documentation at bottom of file
 
-our $VERSION = "0.20"; 
+our $VERSION = "0.21"; 
 
 use strict;
 use warnings;
@@ -272,6 +272,14 @@ sub _new { # creates a new instance of a request object
 
     require APR::Request::Apache2;
     $self->{APR_request} = APR::Request::Apache2->handle($self->{modperl});
+  }
+  elsif(ref($_[0]) eq 'CGI::Fast') {
+    $self->{cgi}         = $_[0];
+    $self->{server_root} = $ENV{CONTEXT_DOCUMENT_ROOT};
+    $self->{user}        = $self->{cgi}->remote_user || "Anonymous";
+    $self->{url}         = $self->{cgi}->url(-path => 1);
+    $self->{method}      = $self->{cgi}->request_method;
+    $path                = $ENV{SCRIPT_FILENAME};
   }
   else { # create the CGI instance
     $self->{cgi}         = CGI->new(@_);
