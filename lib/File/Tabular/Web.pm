@@ -16,45 +16,64 @@ use AppConfig       qw/:argcount/;
 use File::Tabular 0.71;
 use Search::QueryParser;
 
+use Try::Tiny;
+use parent 'Plack::Component';
+use Plack::Request;
+use Plack::Response;
 
 my %app_cache;
 my %datafile_cache;      #  persistent data private to _cached_content
 
 
-# Methods names starting with an '_' should not be overridden 
-# in subclasses !
-
-
 #======================================================================
-#             MAIN ENTRY POINT (for modperl or cgi-bin)               #
+#             MAIN ENTRY POINT 
 #======================================================================
 
-
 #----------------------------------------------------------------------
-sub handler : method { 
+sub call { # Plack request dispatcher (see L<Plack::Component>)
 #----------------------------------------------------------------------
-  my $class = shift; # if under modperl, $_[0] will be the Apache2::RequestRec
-  my $self;
-  eval { $self = $class->_new(@_);  $self->_dispatch_request; 1;}
-    or do {
-      $self ||= bless {}, $class;  # fake object if the new() method failed
-      $self->{msg} = "<b><font color='red'>ERROR</font></b> : $@";
-      $self->{view} = 'msg';
+  my ($self, $env) = @_;
 
+  try {
+    # regular response
+    $self->_new($env);
+    $self->_dispatch_request;
+  }
+    # in case of an exception
+    catch {
       # try displaying through msg view..
-      eval {$self->display}
-        or do { # .. or else fallback with simple HTML page
-          my $content = "<html>$self->{msg}</html>\n";
-          if (ref($_[0]) =~ /^Apache2/) { # if under mod_perl
-            $_[0]->print($content)
-          }
-          else {
-            print "Content-type: text/html\n\n$content";
-          }
+      $self->{msg} = "<b><font color='red'>ERROR</font></b> : $_";
+      $self->{view} = 'msg';
+      try {$self->display}
+        catch { 
+          # .. or else fallback with simple HTML page
+          my $res = Plack::Response->new(500);
+          $res->body("<html>$self->{msg}</html>");
+          $res->content_type('text/html');
+          return $res->finalize;
         };
     };
+}
 
-  return 0; # Apache2::Const::OK;
+
+
+#----------------------------------------------------------------------
+sub handler : method { # for backwards compatibility : can be called
+                       # as a modperl handler or from a CGI script
+#----------------------------------------------------------------------
+  my ($class, $request) = @_;
+
+  my $self = $class->new;
+  my $app  = $self->to_app;
+
+  if ($request && ref($request) =~ /^Apache2/) {
+    require 'Plack::Handler::Apache2';
+    Plack::Handler::Apache2->call_app($request, $app);
+  }
+  else {
+    require 'Plack::Handler::CGI';
+    Plack::Handler::CGI->new->run($app);
+  }
 }
 
 
@@ -65,15 +84,14 @@ sub handler : method {
 #----------------------------------------------------------------------
 sub _app_new { # creates a new application hashref (not an object)
 #----------------------------------------------------------------------
-  my ($class, $config_file) = @_;
+  my ($self, $config_file) = @_;
   my $app = {};
 
   # application name and directory : defaults from the name of config file
-#  @{$app}{qw(name dir suffix)} = fileparse($config_file, qr/\.[^.]*$/);
   @{$app}{qw(dir name)} = ($config_file =~ m[^(.+[/\\])(.+?)(?:\.[^.]*)$]);
 
   # read the config file
-  $app->{cfg} = $class->_app_read_config($config_file);
+  $app->{cfg} = $self->_app_read_config($config_file);
 
   my $tmp; # predeclare $tmp so that it can be used in "and" clauses
 
@@ -91,12 +109,12 @@ sub _app_new { # creates a new application hashref (not an object)
   $app->{data_file} = $app->{dir} . ($tmp || "$app->{name}.txt");
 
   # application class
+  $app->{class} = ref $self; # initial value, may be overridden
   $tmp = $app->{cfg}->get('application_class') and do {
-    eval "require $tmp" or die $@; # dynamically load the requested code
-    $tmp->isa($class) or die "$tmp is not a $class";
+    eval "require $tmp"      or die $@; # dynamically load the requested code
+    $tmp->isa($app->{class}) or die "$tmp is not a $app->{class}";
     $app->{class} = $tmp;
   };
-  $app->{class} ||= $class; # default if not specified in config
 
   return $app;
 }
@@ -147,7 +165,8 @@ sub app_initialize {
   my ($self)   = @_;
   my $app      = $self->{app};
   my ($last_subdir) = ($app->{dir} =~ m[^.*[/\\](.+)[/\\]?$]);
-  my $default  = $self->app_tmpl_default_dir;
+  my $default  =   $self->{template_root}
+                || $self->app_tmpl_default_dir;
 
   # directories to search for Templates
   my @tmpl_dirs = grep {-d} ($app->{cfg}->get("template_dir"), 
@@ -176,7 +195,7 @@ sub app_tmpl_default_dir { # default; override in subclasses
 #----------------------------------------------------------------------
   my ($self) = @_;
 
-  return "$self->{server_root}/lib/tmpl/ftw";
+  return "$self->{app_root}/../lib/tmpl/ftw";
 }
 
 
@@ -254,50 +273,60 @@ sub app_phases_definitions {
 #           METHODS FOR INSTANCE CREATION / INITIALIZATION            #
 #======================================================================
 
+
+
 #----------------------------------------------------------------------
-sub _new { # creates a new instance of a request object
+sub _new { # expands and re-blesses the File::Tabular::Web instance
 #----------------------------------------------------------------------
-  my $class = shift; # if under modperl, $_[0] will be the Apache2::RequestRec
-  my $self = {};
-  my $path;
+  my ($self, $env) = @_;
 
-  # if under mod_perl, we got an Apache2::RequestRec as second arg
-  if (ref($_[0]) =~ /^Apache2/) {
-    $self->{modperl}     = $_[0];
-    $self->{server_root} = Apache2::ServerUtil::server_root();
-    $self->{user}        = $self->{modperl}->user || "Anonymous";
-    $self->{url}         = $self->{modperl}->uri;
-    $self->{method}      = $self->{modperl}->method;
-    $path                = $self->{modperl}->filename;
+  my $req       = Plack::Request->new($env);
+  my $path_info = $req->path_info
+    or die __PACKAGE__ . ": no application (PATH_INFO is empty)";
 
-    require APR::Request::Apache2;
-    $self->{APR_request} = APR::Request::Apache2->handle($self->{modperl});
-  }
-  else { # create the CGI instance
-    $self->{cgi}         = CGI->new(@_);
-    # server_root: no definite info. We guess it is one level above doc_root
-    $self->{server_root} = ($ENV{DOCUMENT_ROOT} =~ m[(.*)[/\\]])[0];
-    $self->{user}        = $self->{cgi}->remote_user || "Anonymous";
-    $self->{url}         = $self->{cgi}->url(-path => 1);
-    $self->{method}      = $self->{cgi}->request_method;
-    $path                = $self->{cgi}->path_translated;
-  }
+  # add some fields within object
+  $self->{req}           = $req;
+  $self->{user}          = $req->user || "Anonymous";
+  $self->{url}           = $req->base . $path_info;
+  $self->{method}        = $req->method;
 
-  # get file last modification time
-  my $mtime = (stat $path)[9] or die "couldn't stat $path";
-  my $cache_entry = $app_cache{$path};
+  # are we running under mod_perl ? if so, have a handle to the Rec object.
+  my $mod_perl = do {my $input = $self->{req}->env->{'psgi.input'};
+                     $input->isa('Apache2::RequestRec') && $input};
+
+  # find the app root, by default equal to server document root
+  $self->{app_root}
+    ||=   $mod_perl && $mod_perl->document_root
+       || $ENV{CONTEXT_DOCUMENT_ROOT} # new in Apache2.4
+       || $ENV{DOCUMENT_ROOT};        # standard CGI protocol
+
+  # find application file
+  my $app_file =   $mod_perl && $mod_perl->filename
+                || $ENV{SCRIPT_FILENAME}
+                || $ENV{PATH_TRANSLATED}
+                || $self->{app_root} . $req->script_name . $path_info;
+
+  # compare modification time with cache; load app if necessary
+  my $mtime = (stat $app_file)[9]
+    or die "couldn't stat app file for $path_info TODO [$app_file]";
+  my $cache_entry = $app_cache{$app_file};
   my $app_initialized = $cache_entry && $cache_entry->{mtime} == $mtime;
   if (not $app_initialized) {
-    $app_cache{$path} = {mtime   => $mtime, 
-                         content => $class->_app_new($path)};
+    $app_cache{$app_file} = {mtime   => $mtime, 
+                             content => $self->_app_new($app_file)};
   }
-  $self->{app} = $app_cache{$path}->{content};
+  $self->{app} = $app_cache{$app_file}->{content};
   $self->{cfg} = $self->{app}{cfg}; # shortcut
 
-  # bless the request obj into the application class, initialize and return
+  # rebless the request obj into the application class, initialize and return
   bless $self, $self->{app}{class};
-  $app_initialized or $self->app_initialize; # must happen after "bless"
+
+  # now that we have the proper class, initialize the app if needed
+  $self->app_initialize unless $app_initialized;
+
+  # initialize the request obj
   $self->initialize;
+
   return $self;
 }
 
@@ -340,12 +369,10 @@ sub _setup_phases { # decide about next phases
   # special case : with POST requests, we want to also consider the ?A or ?M=..
   # or ?D=.. from the query string
   if (not @letters and $self->{method} eq 'POST') {
-    my ($target, $method) = 
-      $self->{modperl} ? ($self->{APR_request}, "args"     )
-                       : ($self->{cgi},         "url_param");
+  LETTER:
     for my $try_letter (qw/A M D/) {
-      $letter_arg = $target->$method($try_letter);
-      $letter = $try_letter and last if defined($letter_arg);
+      $letter_arg = $self->{req}->query_parameters->get_one($try_letter);
+      $letter = $try_letter and last LETTER if defined($letter_arg);
     }
   }
 
@@ -411,28 +438,25 @@ sub open_data { # open File::Tabular object on data file
 
 
 #----------------------------------------------------------------------
-sub param { 
+sub param { # Encapsulates access to the lower layer param() method, and
+            # merge with config information.
 #----------------------------------------------------------------------
   my ($self, $param_name) = @_; # $param_name might be undef
 
-  # Unified way to get to param() method in the underlying layer.
-  # On POST requests, CGI->param(..) only returns body params, while
-  # APR::Request->param(..) returns both query string and body params;
-  # here we only want body params, so we must call another method (body).
-  my $target = $self->{modperl} ? $self->{APR_request} : $self->{cgi};
-  my $param_method 
-    = ($self->{modperl} && $self->{method} eq 'POST') ? 'body' : 'param';
-  my @vals = defined($param_name) ? $target->$param_method($param_name)
-                                  : $target->$param_method();
+  # Like old CGI->param(), we only return body parameters on POST
+  # requests (ignoring query parameters).
+  my $params = $self->{method} eq 'POST' ? $self->{req}->body_parameters
+                                         : $self->{req}->parameters;
 
   # if no arg, just return the list of param names
-  return @vals if not defined $param_name;
+  return keys %$params if not defined $param_name;
 
   # otherwise, first check in "fixed" section in config
   my $val = $self->{cfg}->get("fixed_$param_name");
   return $val if $val;
 
   # then check in parameters to this request (flattened into a scalar)
+  my @vals = $params->get_all($param_name);
   if (@vals) {
     $val = join(' ', @vals);    # join multiple values
     $val =~ s/^\s+//;           # remove initial spaces
@@ -523,36 +547,16 @@ sub display { # display results in the requested view
   $self->{app}{tmpl}->process($tmpl_name, $vars, \$body)
     or die $self->{app}{tmpl}->error();
 
-  $self->_emit_page(\$body);
+  # generate Plack response
+  my $res = Plack::Response->new(200);
+  $res->headers({"Content-type"   => "text/html",
+                 "Content-length" => length($body),
+                 "Last-modified"  => $self->{data}->stat->{mtime},
+                 "Expires"        => 0});
+  $res->body($body);
+
+  return $res->finalize;
 }
-
-
-#----------------------------------------------------------------------
-sub _emit_page {
-#----------------------------------------------------------------------
-  my ($self, $body_ref) = @_;
-
-  # print headers and body
-  my $length   = length $$body_ref;
-  my $modified = $self->{data}->stat->{mtime};
-  if ($self->{modperl}) {
-    $self->{modperl}->content_type('text/html');
-    $self->{modperl}->set_last_modified($modified);
-    $self->{modperl}->set_content_length($length);
-    $self->{modperl}->headers_out->add(Expires => 0);
-    $self->{modperl}->print($$body_ref);
-  }
-  else {
-    my $CRLF = "\015\012";
-    print "Content-type: text/html$CRLF"
-        . "Content-length: $length$CRLF"
-        . "Last-modified: $modified$CRLF"
-        . "Expires: 0$CRLF"
-        . "$CRLF"
-        . $$body_ref;
-  }
-}
-
 
 
 #======================================================================
@@ -708,11 +712,11 @@ sub params_for_next_slice {
   my ($self, $start) = @_;
 
   # need request object to invoke native param() method
-  my $req = $self->{APR_request} || $self->{cgi}; 
+  my $req = $self->{req};
 
   my @params = ("S=$self->{search_string_orig}", "start=$start");
-  push @params, "orderBy=$self->{orderBy}" if $req->param('orderBy');
-  push @params, "count=$self->{count}"     if $req->param('count');
+  push @params, "orderBy=$self->{orderBy}" if $req->parameters->{orderBy};
+  push @params, "count=$self->{count}"     if $req->parameters->{count};
 
   return @params;
 }
@@ -1345,9 +1349,9 @@ C<< [template]dir >>
 =item *
 
 some default directories: 
-  C<< <server_root>/lib/tmpl/ftw/<application_name> >>,
-  C<< <server_root>/lib/tmpl/ftw/<default> >>,
-  C<< <server_root>/lib/tmpl/ftw >>.
+  C<< <app_root>/../lib/tmpl/ftw/<application_name> >>,
+  C<< <app_root>/../lib/tmpl/ftw/<default> >>,
+  C<< <app_root>/../lib/tmpl/ftw >>.
 
 
 =back
@@ -1361,12 +1365,11 @@ some default directories:
 =item C<self>
 
 handle to the C<File::Tabular::Web> object; from there you can access
-C<self.url> (URL of the application), 
-C<self.server_root> (server root directory), 
-C<self.cfg> (configuration information, an L<AppConfig|AppConfig> object), 
+C<self.url> (URL of the application),
+C<self.app_root> (root dir for applications, by default equal to DOCUMENT_ROOT),
+C<self.cfg> (configuration information, an L<AppConfig|AppConfig> object),
 C<self.mtime> (modification time of the data file),
-C<self.modperl> or C<self.cgi>, 
-and C<self.msg> (last message). You can also 
+and C<self.msg> (last message). You can also
 call methods L</can_do> or L</param>, like for example
 
   [% IF self.can_do('add') %]
@@ -1834,7 +1837,7 @@ you should probably call C<SUPER::app_initialize>.
 =head3 app_tmpl_default_dir
 
 Returns the default directory containing templates.
-The default is C<< <server_root>/lib/tmpl/ftw >>.
+The default is C<< <app_root>/../lib/tmpl/ftw >>.
 
 =head3 app_tmpl_filters
 
@@ -1978,15 +1981,10 @@ are joined with a space. Initial
 and trailing spaces are automatically removed.
 
 If you need to access the list of values in the HTTP request,
-you can always call 
+you can call
 
-  [% self.cgi.param(param_name) %]
+  [% self.req.param(param_name) %]
 
-or 
-
-  [% self.APR_request.param(param_name) %]
-
-(whichever is appropriate).
 
 
 =head3 can_do
@@ -2014,11 +2012,6 @@ Executes the various phases of request handling
 Finds the template corresponding to the view name,
 gathers its output, and prints it together with 
 some HTTP headers.
-
-=head3 _emit_page
-
-Internal method for printing headers and body, 
-using API from modperl or CGI.
 
 =head2 Request handling : search methods
 
@@ -2180,7 +2173,6 @@ TODO
 
 TO CHECK WHEN UPGRADING
 
-  - permissions, esp. permission to add/modif (see Jetons PH)
  - 'add' permission without 'modif' 
   - remove calls to [% self.url('foobar') %]
   - config : autoNum and not autonum
