@@ -67,11 +67,11 @@ sub handler : method { # for backwards compatibility : can be called
   my $app  = $self->to_app;
 
   if ($request && ref($request) =~ /^Apache2/) {
-    require 'Plack::Handler::Apache2';
+    require Plack::Handler::Apache2;
     Plack::Handler::Apache2->call_app($request, $app);
   }
   else {
-    require 'Plack::Handler::CGI';
+    require Plack::Handler::CGI;
     Plack::Handler::CGI->new->run($app);
   }
 }
