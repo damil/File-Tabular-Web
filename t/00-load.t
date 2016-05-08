@@ -3,17 +3,18 @@
 use Test::More tests => 3;
 
 BEGIN {
-	use_ok( 'File::Tabular::Web' );
-	use_ok( 'File::Tabular::Web::Attachments' );
+  require_ok 'File::Tabular::Web'
+    or BAIL_OUT;
+  require_ok 'File::Tabular::Web::Attachments'
+    or BAIL_OUT;
 }
 
 diag( "Testing File::Tabular::Web $File::Tabular::Web::VERSION, Perl $], $^X" );
 
-
 SKIP: {
-  eval {require Search::Indexer};
-  skip "Search::Indexer does not seem to be installed", 1
-    if $@;
+  eval {require Search::Indexer; 1}
+    or skip "Search::Indexer does not seem to be installed", 1;
 
-  use_ok( 'File::Tabular::Web::Attachments::Indexed' );
+  require_ok 'File::Tabular::Web::Attachments::Indexed'
+    or BAIL_OUT;
 }

@@ -24,7 +24,6 @@ use Plack::Response;
 my %app_cache;
 my %datafile_cache;      #  persistent data private to _cached_content
 
-
 #======================================================================
 #             MAIN ENTRY POINT 
 #======================================================================
@@ -72,6 +71,7 @@ sub handler : method { # for backwards compatibility : can be called
   }
   else {
     require Plack::Handler::CGI;
+    $ENV{QUERY_STRING} = $request if $request;
     Plack::Handler::CGI->new->run($app);
   }
 }
@@ -289,6 +289,7 @@ sub _new { # expands and re-blesses the File::Tabular::Web instance
   $self->{user}          = $req->user || "Anonymous";
   $self->{url}           = $req->base . $path_info;
   $self->{method}        = $req->method;
+  $self->{msg}           = "";
 
   # are we running under mod_perl ? if so, have a handle to the Rec object.
   my $mod_perl = do {my $input = $self->{req}->env->{'psgi.input'};
@@ -297,13 +298,13 @@ sub _new { # expands and re-blesses the File::Tabular::Web instance
   # find the app root, by default equal to server document root
   $self->{app_root}
     ||=   $mod_perl && $mod_perl->document_root
-       || $ENV{CONTEXT_DOCUMENT_ROOT} # new in Apache2.4
-       || $ENV{DOCUMENT_ROOT};        # standard CGI protocol
+       || $env->{CONTEXT_DOCUMENT_ROOT} # new in Apache2.4
+       || $env->{DOCUMENT_ROOT};        # standard CGI protocol
 
   # find application file
   my $app_file =   $mod_perl && $mod_perl->filename
-                || $ENV{SCRIPT_FILENAME}
-                || $ENV{PATH_TRANSLATED}
+                || $env->{SCRIPT_FILENAME}
+                || $env->{PATH_TRANSLATED}
                 || $self->{app_root} . $req->script_name . $path_info;
 
   # compare modification time with cache; load app if necessary
@@ -371,7 +372,7 @@ sub _setup_phases { # decide about next phases
   if (not @letters and $self->{method} eq 'POST') {
   LETTER:
     for my $try_letter (qw/A M D/) {
-      $letter_arg = $self->{req}->query_parameters->get_one($try_letter);
+      $letter_arg = $self->{req}->query_parameters->get($try_letter);
       $letter = $try_letter and last LETTER if defined($letter_arg);
     }
   }
