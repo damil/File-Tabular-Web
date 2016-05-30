@@ -1,6 +1,6 @@
 package File::Tabular::Web; # documentation at bottom of file
 
-our $VERSION = "0.20"; 
+our $VERSION = "0.21";
 
 use strict;
 use warnings;
@@ -58,7 +58,8 @@ sub call { # Plack request dispatcher (see L<Plack::Component>)
 
 #----------------------------------------------------------------------
 sub handler : method { # for backwards compatibility : can be called
-                       # as a modperl handler or from a CGI script
+                       # as a modperl handler or from a CGI script.
+                       # New apps should rather use the Plack interface.
 #----------------------------------------------------------------------
   my ($class, $request) = @_;
 
@@ -285,11 +286,11 @@ sub _new { # expands and re-blesses the File::Tabular::Web instance
     or die __PACKAGE__ . ": no application (PATH_INFO is empty)";
 
   # add some fields within object
-  $self->{req}           = $req;
-  $self->{user}          = $req->user || "Anonymous";
-  $self->{url}           = $req->base . $path_info;
-  $self->{method}        = $req->method;
-  $self->{msg}           = "";
+  $self->{req}    = $req;
+  $self->{user}   = $req->user || "Anonymous";
+  $self->{url}    = $req->base . $path_info;
+  $self->{method} = $req->method;
+  $self->{msg}    = "";
 
   # are we running under mod_perl ? if so, have a handle to the Rec object.
   my $mod_perl = do {my $input = $self->{req}->env->{'psgi.input'};
@@ -309,7 +310,7 @@ sub _new { # expands and re-blesses the File::Tabular::Web instance
 
   # compare modification time with cache; load app if necessary
   my $mtime = (stat $app_file)[9]
-    or die "couldn't stat app file for $path_info TODO [$app_file]";
+    or die "couldn't stat app file for $path_info";
   my $cache_entry = $app_cache{$app_file};
   my $app_initialized = $cache_entry && $cache_entry->{mtime} == $mtime;
   if (not $app_initialized) {
@@ -948,195 +949,135 @@ __END__
 
 =head1 NAME
 
-File::Tabular::Web - turn a tabular file into a web application
+File::Tabular::Web - turn tabular files into web applications
 
 =head1 SYNOPSIS
 
-=over
+  # start a local HTTP server
+  plackup -MFile::Tabular::Web -e "File::Tabular::Web->new->to_app"
 
-=item configure the http server (here with modperl)
+  # create an application scaffolding from a tabular file
+  perl ftw_new_app.pl path/to/some/data.txt
 
-  <LocationMatch "\.ftw$">
-    SetHandler modperl
-    PerlResponseHandler File::Tabular::Web
-  </LocationMatch>
+  # use the app
+  http://localhost:5000/path/to/some/data.ftw?S=foo
+  http://localhost:5000/path/to/some/data.ftw?S=col1:bar*
+  http://localhost:5000/path/to/some/data.ftw?S=col2 < 123 AND col3 ~ \w\d
+  http://localhost:5000/path/to/some/data.ftw?L=id_of_some_record
 
-=item generate a CRUD application for one tabular file (scaffolding)
+  # not displayed here
+  # - POST URLs to edit the data
+  # - integration in a real application server instead of localhost
 
-  cp some/data.txt /path/to/http/htdocs/some/data.txt
-  perl ftw_new_app.pl /path/to/http/htdocs/some/data.txt
+  # customize the app -- no programming involved
+  edit path/to/some/{data_short.tt,data_long.tt,data_edit.tt}  # views
+  edit path/to/some/data.ftw                                   # config
 
-=item use the application
-
-  http://myServer/some/data.ftw
-
-=item customize
-
-  # change some configuration options
-  edit /path/to/http/htdocs/some/data.ftw 
-  
-  # change the views
-  edit /path/to/http/htdocs/some/{data_short.tt,data_long.tt,data_edit.tt}
-
-=back
 
 =head1 DESCRIPTION
 
-=head2 Introduction
+This is a simple web application framework
+for searching, displaying and updating data from flat tabular files.
 
-This is a simple Apache web application framework based on
-L<File::Tabular|File::Tabular> and
-L<Search::QueryParser|Search::QueryParser>.  The framework offers
-builtin services for searching, displaying and updating a flat tabular
-datafile, possibly with attached documents (see
-L<File::Tabular::Web::Attachments|File::Tabular::Web::Attachments> and 
-L<File::Tabular::Web::Attachments::Indexed|File::Tabular::Web::Attachments::Indexed>).
+The framework is based on L<File::Tabular|File::Tabular> and
+L<Search::QueryParser|Search::QueryParser> for searching and editing
+facilities, and on L<Plack> middleware for Web support. As a result,
+it will run on any Plack-supported infrastructure, like C<CGI>,
+C<FCGI>, C<modperl>, or a local HTTP server launched from the command
+line through the L<plackup> utility.
 
-The strong point of C<File::Tabular::Web> is that it is built
-around a search engine designed from the start for Web 
-requests : by default it searches for complete words, spanning
-all data fields. However, you can easily write queries that
-look in specific fields, using regular expressions, boolean
-combinations, arithmetic operators, etc.
-So if you are looking for simplicity and speed of development,
-rather than speed of execution, then you may have found a convenient
-tool. 
+The strong point of C<File::Tabular::Web> is that it is built around a
+versatile search engine, convenient for Web-style queries: this search
+engine spans all data fields by default, but can also retrieve words
+in specific fields, find prefixes, apply regular expressions, compare
+numerical values, use boolean combinations, etc.  All of that power is
+available directly to all applications within the framework, without
+any programming.  To build a new application, all that is needed is to
+invoke the C<ftw_new_app.pl> script, which will create some
+scaffolding templates for searching, displaying and editing your
+data. The application is immediately usable; the templates can be
+customized to improve the look and feel, and the configuration file
+can be edited to tune some aspects like access control ... but no Perl
+code is needed, at least not for common needs.  So if you are looking
+for simplicity and speed of development and deployment, and
+are ready to sacrifice some speed of execution, then you may have
+found a convenient tool.
 
-We use it intensively in our Intranet for managing 
-lists of people, rooms, meetings, internet pointers, etc., and even
-for more sensitive information like lists of payments or 
-the archived judgements (minutes) of Geneva courts.
-Of course this is slower that a real database, 
-but for data up to 10MB/50000 records, the difference
-is hardly noticeable. On the other side, ease of
-development and deployment and ease of importing/exporting
-data proved to be highly valuable assets.
+This framework has been used successfully for about 15 years in our
+Intranet for managing lists of people, rooms, meetings, links, etc.,
+and even for more sensitive information like lists of payments or the
+archived judgements (minutes) of Geneva courts.  Of course this
+technology is much slower than a real database, but if the data is not
+too big and the frequency of requests is not too high, it can be a
+perfectly viable solution.
 
-
-=head2 Building an application
-
-To build an application, all you need to do is :
-
-=over
-
-=item *
-
-Insert the data (a tabular .txt file) somewhere
-in your Apache F<htdocs> tree.
-
-=item *
-
-Run the helper script L<ftw_new_app.pl>, which
-automatically builds configuration and template files.
-The new URL becomes immediately
-active, without webserver configuration nor restart, 
-so you already have a "scaffolding" 
-application for searching, displaying, and maybe
-edit the data.
-
-
-=item *
-
-If necessary, tune various options in the configuration file,
-and customize the template files for presenting the data
-according to your needs.
-
-=back
-
-In most cases, those steps will be sufficient, so
-they can be performed by a webmaster without Perl
-knowledge.
-
-For more advanced uses, application-specific Perl 
-subclasses  can be
-hooked up into the framework for performing particular tasks.
-See for example the companion
-L<File::Tabular::Web::Attachments|File::Tabular::Web::Attachments>
-module, which provides services for attaching documents
-and indexing them through  L<Search::Indexer|Search::Indexer>,
-therefore providing a mini-framework for storing electronic documents.
+See also
+L<File::Tabular::Web::Attachments|File::Tabular::Web::Attachments> and
+L<File::Tabular::Web::Attachments::Indexed|File::Tabular::Web::Attachments::Indexed> for subclasses that extend the framework with
+methods for managing documents attached to data fields.
 
 
 =head1 QUICKSTART
 
 
-=head2 Apache configuration
+=head2 HTTP server configuration
 
-C<File::Tabular::Web> is designed so that it can be
-installed once and for all in your Apache configuration.
+C<File::Tabular::Web> is designed so that it only needs to be
+installed once and for all in your HTTP server configuration.
 Then all I<applications> can be added or modified
 on the fly, without restarting the server.
 
-First choose a file extension for your C<File::Tabular::Web> 
-applications; in the examples below we assume it to be C<.ftw>.
-Then configure your Apache server in one of the ways described
-below.
-
-
-=head3 Configuration as a mod_perl handler
-
-If you have mod_perl, the easiest way is to declare
-it as a mod_perl handler associated to C<.ftw> URLs.
-Edit your F<perl.conf> as follows :
+For this to work, you need to tell the HTTP server which
+URLs are going to be served by C<File::Tabular::Web>.
+Although there are several ways to achieve this, the recommended
+way is to choose a file extension to be associated with this
+module and define a general rule performing the mapping. Here
+is an example using Apache, Plack and mod_perl :
 
   <LocationMatch "\.ftw$">
-    SetHandler modperl
-    PerlResponseHandler File::Tabular::Web
+    SetHandler perl-script
+    PerlResponseHandler Plack::Handler::Apache2
+    PerlSetVar psgi_app /path/to/ftw.psgi
   </LocationMatch>
 
+where F</path/to/ftw.psgi> is a path to a simple PSGI file
+containing the following code :
 
-=head3 Configuration as a cgi-bin script
+  use File::Tabular::Web;
+  my $app = File::Tabular::Web->new->to_app;
 
-Create an executable file in F<cgi-bin> directory, 
-named C<ftw>, and containing
+Once this is configured, any URL ending in F<.ftw> will be served
+by C<File::Tabular::Web>.
 
-   #!/path/to/perl
-   use File::Tabular::Web;
-   File::Tabular::Web->handler;
+The example above just gives the general idea; similar configurations
+can be obtained with FCGI or other architectures, setting the rules either
+within the HTTP server or within the C<Plack> middleware; see your web
+server documentation and the L<Plack> documentation.
 
-Then you can acces your applications as
+For development purposes, an application server can be started from the
+command line, thanks to the L<Plack> infrastructure :
 
-  http://my.server/cgi-bin/ftw/path/to/my/app.ftw
+  plackup /path/to/ftw.psgi
 
+or the C<ftw.psgi> can even be dispensed with, through the command
 
-=head4 Implicit call of the script through mod_actions
-
-If your Apache has the C<mod_actions> module
-(most installations have it), then it
-is convenient to add the following directives
-in F<httpd.conf> :
-
-  Action file-tabular-web /cgi-bin/ftw 
-  AddHandler file-tabular-web .ftw
-
-Now any file ending with ".ftw" in your htdocs tree will be treated as
-a File::Tabular::Web application. In other words,
-instead of 
-
-  http://my.server/cgi-bin/ftw/path/to/my/app.ftw
-
-you can use URL
-
-  http://my.server/path/to/my/app.ftw
-
-
-As already explained, C<.ftw> is just an arbitrary convention
-and can be replaced by any other suffix.
-Similarly, the C<file-tabular-web> handler name can be arbitrarily 
-replaced by another name.
-
-
-
-=head3 Configuration as a fastcgi script
-
-[probably works like cgi-bin; not tested yet]
-
-
+  plackup -MFile::Tabular::Web -e "File::Tabular::Web->new->to_app"
 
 
 =head2 Setting up a particular application
 
-We'll take for example a simple people directory application.
+An application consists of a I<data file>, a I<configuration file> and
+a couple of I<template files>. In the simplest setting, all of these
+should be located in the same directory, at some path under an
+I<app_root> directory, which by default is the same as the
+DOCUMENT_ROOT of your HTTP server. The data file is all you need to
+get started; the other files will be generated automatically.
+
+We will show this through the example of a simple people directory
+application, assuming an Apache server where the document root is the
+C<htdocs> directory. If you want to try with a local server instead,
+using the C<plackup> command shown above, your document root is the
+current directory.
 
 
 =over
@@ -1147,15 +1088,13 @@ First create directory F<htdocs/people>.
 
 =item *
 
-Let's assume that you already have a list of people,
-in a spreadsheet or a database.
-Export that list into a flat text file named
-F<htdocs/people/dir.txt>.
-If you export from an Excel Spreadsheet, do NOT export as CSV format ; 
-choose "text (tab-separated)" instead. The datafile should contain
-one line per record, with a character like '|' or TAB as field 
-separator, and field names on the first line 
-(see L<File::Tabular|File::Tabular> for details).
+Let's assume that you already have a list of people, in a spreadsheet
+or a database.  Export that list into a flat text file named
+F<htdocs/people/dir.txt>.  If you export from an Excel Spreadsheet, do
+NOT export as CSV format ; choose "text (tab-separated)" instead. The
+datafile should contain one line per record, with a character like '|'
+or TAB as field separator, and field names on the first line (see
+L<File::Tabular|File::Tabular> for details).
 
 
 =item *
@@ -1177,27 +1116,42 @@ for a list.
 =item *
 
 The URL C<http:://your.web.server/people/dir.ftw>
-is now available to access the application.
+is now available to access the application,
+ready for searching, displaying, and maybe
+edit the data.
 You may first test the default layout, and then customize
-the templates to suit your needs.
+the templates to suit your needs. The templating language
+is documented in the L<"Template Toolkit's documentation"|Template::Manual>.
 
 =back
 
-Note : initially all files are placed in the same directory, because
-it is simple and convenient; however, data and templates files
-are not really web resources and therefore theoretically should not 
-belong to the htdocs tree. If you want a more structured architecture,
-you may move these files to a different location, and specify
-within the configuration how to find them (see instructions below).
+B<Note> : initially all files are placed in the same directory,
+because it is simple and convenient; however, data and templates files
+are not really web resources and therefore theoretically should not
+belong to the F<htdocs> tree. If you want a more structured
+architecture, you may move these files to a different location, and
+specify within the configuration how to find them (see instructions
+below).
+
+In most cases, the steps just shown will be sufficient, so
+they can be performed by a webmaster without Perl
+knowledge.
+
+For more advanced uses, application-specific Perl subclasses can be
+hooked up into the framework for performing particular tasks.  See for
+example the companion
+L<File::Tabular::Web::Attachments|File::Tabular::Web::Attachments>
+module, which provides services for attaching documents and indexing
+them through L<Search::Indexer|Search::Indexer>, therefore providing a
+mini-framework for storing electronic documents.
 
 
 =head1 WEB API
 
 =head2 Entry points
 
-Various entry points into the application 
-(searching, editing, etc.) are
-chosen by single-letter arguments :
+Various entry points into the application (searching, editing, etc.)
+are chosen by single-letter arguments :
 
 
 =head3 H
@@ -1205,7 +1159,7 @@ chosen by single-letter arguments :
   http://myServer/some/app.ftw?H
 
 Displays the homepage of the application (through the C<home> view).
-This is the default entry point, i.e. equivalent to 
+This is the default entry point, i.e. equivalent to
 
   http://myServer/some/app.ftw
 
@@ -1213,7 +1167,7 @@ This is the default entry point, i.e. equivalent to
 
   http://myServer/some/app.ftw?S=<criteria>
 
-Searches records matching the specified criteria, and displays 
+Searches records matching the specified criteria, and displays
 a short summary of each record (through the C<short> view).
 Here are some example of search criteria :
 
@@ -1229,7 +1183,7 @@ Here are some example of search criteria :
                                     #   about string/numeric/date comparisons)
   field~regex                       # regex
 
-See L<Search::QueryParser> and L<File::Tabular> for 
+See L<Search::QueryParser> and L<File::Tabular> for
 more details.
 
 Additional parameters may control sorting and pagination. Ex:
@@ -1277,11 +1231,11 @@ in detail through the C<long> view.
 
   http://myServer/some/app.ftw?M=key
 
-If called with method GET, finds the record with the given key and 
+If called with method GET, finds the record with the given key and
 displays it through the
 C<modif> view (typically this view will be an HTML form).
 
-If called with method POST, 
+If called with method POST,
 finds the record with the given key
 and updates it with given field names and values.
 After update, displays an update message through the C<msg> view.
@@ -1290,12 +1244,12 @@ After update, displays an update message through the C<msg> view.
 
   http://myServer/some/app.ftw?A
 
-If called with method GET, displays a form for creating 
-a new record, through the 
+If called with method GET, displays a form for creating
+a new record, through the
 C<modif> view. Fields may be pre-filled by default values
 given in the configuration file.
 
-If called with method POST, 
+If called with method POST,
 creates a new record, with values given by the submitted form.
 After record creation, displays an update message through the C<msg> view.
 
@@ -1319,13 +1273,12 @@ Display all records throught the C<download> view
 
 =head3 V
 
-Name of the view (i.e. template) that will be used 
-instead of the default one.
+Name of the view (i.e. template) that will be used
+for displaying results.
 For example, assuming that the application
 has defined a C<print> view, we can call that view through
 
   http://myServer/some/app.ftw?S=<criteria>&V=print
-
 
 
 =head1 WRITING TEMPLATES
@@ -1340,7 +1293,7 @@ The path for searching templates includes
 =item *
 
 the application directory
-(where the configuration file resides) 
+(where the configuration file resides)
 
 =item *
 
@@ -1377,14 +1330,13 @@ call methods L</can_do> or L</param>, like for example
      <a href="?A">Add a new record</a>
   [% END # IF %]
 
-
-or 
+or
 
   [% self.param('myFancyParam') %]
 
 =item C<found>
 
-structure containing the results of a search. 
+structure containing the results of a search.
 Fields within this structure are :
 
 =over
@@ -1453,14 +1405,14 @@ A typical form for updating or adding a record will look like
 Usually there is no need to specify the C<action> of the
 form : the default action sent by the browser
 will be the same URL (including the query parameter
-C<?A> or C<?M=[% record.Id %]>), and when the application
-receives a POST request, it knows it has 
+C<?A> or C<?M=[% record.Id %]>). When the application
+receives a POST request, it knows it has
 to update or add the record instead of displaying the form.
 This implies that you B<must> use the POST method for any data
 modification; whereas forms for searching may use either GET or POST methods.
 
 For convenience, deletion through a GET url of shape
-C<?D=[% record.Id %]> is supported; however, 
+C<?D=[% record.Id %]> is supported; however,
 data modification through GET method is not recommended,
 and therefore it is preferable to write
 
@@ -1486,27 +1438,25 @@ A typical form for searching will look like
   </form>
 
 So the form can combine several search criteria, all passed through the
-C<S> parameter. The form method can be either GET or POST; but if 
+C<S> parameter. The form method can be either GET or POST; but if
 you choose POST, then it is recommended that you also specify
 
    action="[% self.url %]"
 
-instead of relying on the implicit self-url from the browser. 
+instead of relying on the implicit self-url from the browser.
 Otherwise the URL displayed in the browser may still contain
 some all criteria from a previous search, while the current
-form sends other search criteria --- the application will 
+form sends other search criteria --- the application will
 not get confused, but the user might.
 
 =head2 Highlighting the searched words
 
-The C<preMatch> and C<postMatch> parameters 
-in the configuration file (see below) define some
-marker strings that will be automatically inserted 
-in the data returned by a search, surrounding each word
-that was mentioned in the query. These marker strings 
-should be chosen so that they would unlikely mix with 
-regular data or with HTML markup : the recommanded
-values are 
+The C<preMatch> and C<postMatch> parameters in the configuration file
+(see below) define some marker strings that will be automatically
+inserted in the data returned by a search, surrounding each word that
+was mentioned in the query. These marker strings should be chosen so
+that they would unlikely mix with regular data or with HTML markup :
+the recommanded values are
 
   preMatch  {[
   postMatch ]}
@@ -1525,7 +1475,7 @@ the configuration file is in
 
     /path/to/http/htdocs/some/data.ftw
 
-Because of the Apache configuration directives described above,
+Because of the HTTP server configuration directives described above,
 the URL is always served by C<File::Tabular::Web>, so there
 is no risk of users seing the content of the configuration
 file.
@@ -1542,7 +1492,7 @@ Below is the list of the various recognized sections and parameters.
 =head2 Global section
 
 The global section (without any section header) can contain
-general-purpose parameters that can be retrieved later from 
+general-purpose parameters that can be retrieved later from
 the viewing templates through C<< [% self.cfg.<param> %] >>;
 this is useful for example for setting a title or other
 values that will be common to all templates.
@@ -1557,14 +1507,12 @@ used by the L</highlight> filter (default is C<HL>).
 
 =head2 [fixed] / [default]
 
-The C<fixed> and C<default> sections 
-simulate parameters to the request.
-Specifications in the C<fixed> section are stronger
-than HTTP parameters; specifications in the 
-C<default> section are weaker : the L<param|param>
-method for the application will first look in the C<fixed> section, 
-then in the HTTP request, and finally in the C<default> section.
-So for example with 
+The C<fixed> and C<default> sections simulate parameters to the
+request.  Specifications in the C<fixed> section are stronger than
+HTTP parameters; specifications in the C<default> section are weaker :
+the L<param|param> method for the application will first look in the
+C<fixed> section, then in the HTTP request, and finally in the
+C<default> section.  So for example with
 
   [fixed]
   count=50
@@ -1579,10 +1527,9 @@ will be treated as
 
   ?S=*&count=50&orderBy=lastname
 
-
-Relevant parameters to put in C<fixed> or in C<default>
-are described in section L</S> of this documentation :
-for example C<count>, C<orderBy>, etc.
+Relevant parameters to put in C<fixed> or in C<default> are described
+in section L</S> of this documentation : for example C<count>,
+C<orderBy>, etc.
 
 
 =head2 [application]
@@ -1598,17 +1545,17 @@ By default : same directory as the configuration file.
 
 Name of the application (will be used for example
 as prefix to find template files).
-Single-level name, no pathnames allowed.
+This must be a single-level name (no pathnames allowed).
 
 =item C<< data=some_name >>
 
-Name of the tabular file containing the data.
-Single-level name, must be in the application directory.
+Name of the tabular file containing the data.  This must be a
+single-level name and must reside in the application directory.
 By default: application name with the C<.txt> suffix appended.
 
 =item C<< class=My::File::Tabular::Web::Subclass >>
 
-Will dynamically load the specified module and use it as 
+Will dynamically load the specified module and use it as
 class for objects of this application. The specified module
 must be a subclass of C<File::Tabular::Web>.
 
@@ -1629,21 +1576,20 @@ The result will be available to templates in C<< [% self.mtime %] >>
 
 =head2 [permissions]
 
-This  section specifies permissions to perform operations
-within the application. Of course we need
-Apache to be configured to do some kind of authentification,
-so that the application receives a user name 
-through the C<REMOTE_USER> environment variable;
-many authentification modules are available, 
-see C<Apache/manual/howto/auth.html>.
-Otherwise the default user name received
-by the application is "Anonymous".
+This section specifies permissions to perform operations within the
+application. Of course we need the HTTP server to be configured to do
+some kind of authentification, so that the application receives a user
+name through the C<REMOTE_USER> environment variable.  Otherwise the
+default user name received by the application is "Anonymous".
+Instructions for setting up authentication for an Apache server
+are documented at L<http://httpd.apache.org/docs/2.4/howto/auth.html>.
 
-Apache may also be configured to do some kind of authorisation checking,
-but this will control access to the application as a whole, whereas
-here we configure fine-grained permissions for various operations.
+The HTTP server may also be configured to do some kind of
+authorisation checking, but this will control access to the
+application as a whole, whereas here we configure fine-grained
+permissions for various operations.
 
-Builtin permission names are : 
+Builtin permission names are :
 C<search>,
 C<read>,
 C<add>,
@@ -1660,7 +1606,7 @@ separated by commas or spaces : the current user name will be
 compared to this list. A permission may also specify 'C<*>', which
 means 'everybody' : this is the default for
 permissions C<read>, C<search> and C<download>.
-There is no builtin notion of "user groups", but 
+There is no builtin notion of "user groups", but
 you can introduce such a notion by writing a subclass which overrides the
 L</user_match> method.
 
@@ -1668,7 +1614,7 @@ Permissions may also be granted or denied
 on a per-record basis : writing C<< $fieldname >> (starting
 with a literal dollar sign) means that 
 users can access records in which the content of  C<< fieldname >>
-matches their username. Usually this is associated 
+matches their username. Usually this is associated
 with an I<automatic user field> (see below), so that
 the user who created a new record can later modify it.
 
@@ -1677,7 +1623,7 @@ Example :
   [permissions]
    read   = * # the default, could have been omitted
    search = * # idem
-   add    = andy bill 
+   add    = andy bill
    modif  = $last_author # username must match content of field 'last_author'
    delete = $last_author
 
@@ -1697,7 +1643,7 @@ a record is updated, the current local time will be automatically
 inserted in that field. The I<format> argument will be
 passed to L<POSIX strftime()|POSIX/strftime>. Ex :
 
-  time DateModif = %d.%m.%Y    
+  time DateModif = %d.%m.%Y
   time TimeModif = %H:%M:%S
 
 =item C<< user = <field>  >>
@@ -1730,11 +1676,11 @@ of attached documents).
 
 This section specifies where to find templates for various views.
 The specified locations will be looked for in several directories:
-the application template directory (as specified by C<dir> directive, 
+the application template directory (as specified by C<dir> directive,
 see below), 
 the application directory,
 the default C<File::Tabular::Web> template directory
-(as specified by the C<app_tmpl_default_dir> method), 
+(as specified by the C<app_tmpl_default_dir> method),
 or the subdirectory C<default> of the above.
 
 =over
@@ -1745,13 +1691,13 @@ specifies the application template directory
 
 =item short
 
-Template for the "short" display of records (typically 
+Template for the "short" display of records (typically
 a table for presenting search results). 
 
 =item long
 
-Template for the "long" display of records (typically 
-for a detailed presentation of a single record ). 
+Template for the "long" display of records (typically
+for a detailed presentation of a single record ).
 
 =item modif
 
@@ -1760,7 +1706,7 @@ with an action to call the update URL (C<?M=key>).
 
 =item msg
 
-Template for presenting special messages to the user 
+Template for presenting special messages to the user
 (messages after a record update or deletion, or error messages).
 
 =item home
@@ -1777,36 +1723,94 @@ C<< <application_name>_long.tt >>, etc.
 
 =head1 METHODS
 
-The only I<public> method is the L</handler> method,
-to be called from mod_perl or from a cgi-bin script.
+=head2 Note on the architecture
 
-All other methods are internal to the application,
-i.e. not meant to be called from external code.
-They are documented here in case you would want 
-to subclass the package. If you don't need
-subclassing, you can B<ignore this whole section>.
+The internal object-oriented design is a bit unorthodox, merely
+because I wrote it many years ago at a time when I was less familiar
+with Web architectures; unfortunately this cannot be changed now,
+because there might be subclasses that rely on this particular design.
+External users need not worry about this architecture, but authors
+of subclasses should be aware of the design.
 
-Methods starting with an underscore are meant to
+An instance of C<File::Tabular::Web> plays several roles simultaneously :
+
+=over
+
+=item *
+
+it is an instance of a L<Plack::Component>
+
+=item * 
+
+it maintains a collection of I<application hashrefs>, loaded
+dynamically when needed. Each application hashref holds
+information about its configuration file, template files, etc.
+
+=item *
+
+it acts as a transient I<request object> : every time an HTTP request
+is received, the object is reset to a clean initial state, and may
+be re-blessed into the subclass needed to serve the request.
+
+=back
+
+
+By convention, methods starting with an underscore are meant to
 be I<private>, i.e. should not be redefined in subclasses.
-All other methods are I<protected>.
 
-Currently we use plain old Perl inheritance
-and calls to C<SUPER>. A future move 
-to the C3 method resolution order (see L<Class::C3>) is planned,
-but is not totally trivial because classes are sometimes
-loaded dynamically.
 
 
 =head2 Entry point
+
+=head3 new
+
+  use File::Tabular::Web;
+  my $ftw = File::Tabular::Web->new(app_root => $some_directory);
+
+The C<new> method creates a L<Plack> component which can serve
+requests to a collection of File::Tabular::Web I<applications>.
+
+The C<app_root> optional argument tells where application files
+are located : relative URL to applications will be mapped to
+relative paths starting from this root. If the argument is not explictly
+supplied, a default value is guessed by the system, looking at
+
+=over
+
+=item *
+
+C<< $mod_perl->document_root >> (if under mod_perl)
+
+=item *
+
+C<< $env->{CONTEXT_DOCUMENT_ROOT} >> (new in Apache2.4)
+
+=item *
+
+C<< $env->{DOCUMENT_ROOT} >>
+
+=back
+
+
+=head3 to_app
+
+  my $app = $ftw->to_app;
+
+Creates a I<Plack application> from the Plack component.
+This method is just inherited from L<Plack::Component>.
+
 
 =head3 handler
 
   File::Tabular::Web->handler;
 
-This is the main entry point into the module. It creates a new request
-object, initializes it from information passed through the URL and
-through CGI parameters, processes the request, and generates
-the answer. In case of error, the page contains an error message.
+B<Legacy code> : this method used to be
+the main entry point into the module, to be called from
+mod_perl or CGI scripts. Now the entry point is Plack's
+C<to_app> method shown above. The C<handler> method remains
+only for backwards compatibility; new projects should not use this.
+
+
 
 
 =head2 Methods for creating / initializing "application" hashrefs
@@ -1826,13 +1830,13 @@ the L</app_initialize> method.
 
 Glueing code to the L<AppConfig> module.
 
-=head3 app_initializea
+=head3 app_initialize
 
 Initializes the application hashref. In particular,
 it creates the L<Template> object, with appropriate
 settings to specify where to look for templates.
 
-If you override this method in subclasses, 
+If you override this method in subclasses,
 you should probably call C<SUPER::app_initialize>.
 
 =head3 app_tmpl_default_dir
@@ -1858,13 +1862,13 @@ Then the filters are defined as follows :
 
 =item highlight
 
-Replaces strings of shape C<< {[...[} >> by 
+Replaces strings of shape C<< {[...[} >> by
 C<< <span class="HL">...</span> >>.
 
 The class name is C<HL> by default, but another name can be
 defined through the C<highlightClass> configuration parameter.
-Templates have to define a style for that class, like for 
-example 
+Templates have to define a style for that class, like for
+example
 
   <style>
     .HL {background: lightblue}
@@ -1873,16 +1877,16 @@ example
 
 =item unhighlight
 
-Replaces strings of shape C<< {[...[} >> by 
+Replaces strings of shape C<< {[...[} >> by
 C<< ... >> (i.e. removes the marking).
 
 =back
 
-These filters are intended to help 
-highlighting the words matched by a search request ; 
+These filters are intended to help
+highlighting the words matched by a search request ;
 usually this must happen I<after> the data has been
 filtered for HTML entities. So a typical use
-in a template would be for example 
+in a template would be for example
 
   <a href="/some/url?with=[% record.foo | unhighlight | uri %]">
       link to [% record.foo | html | highlight %]
@@ -1923,7 +1927,7 @@ name of view for displaying the results
 =head3 _new
 
 Creates a new object, which represents an HTTP request
-to the application. The class for the created object is 
+to the application. The class for the created object is
 generally C<File::Tabular::Web>, unless specified otherwise
 in the the configuration file (see the C<class> entry
 in section L</"CONFIGURATION FILE">).
@@ -1935,20 +1939,20 @@ custom code to be executed, use L</initialize> or L</app_initialize>
 =head3 initialize
 
 Code to initialize the object. The default behaviour is
-to setup C<max>, C<count> and C<orderBy> within the 
+to setup C<max>, C<count> and C<orderBy> within the
 object hash.
 
 
 =head3 _setup_phases
 
-Reads the phases definition table and decides about what to 
+Reads the phases definition table and decides about what to
 do in the next phases.
 
 =head3 open_data
 
 Retrieves the name of the datafile, decides whether it
-should be opened for readonly or for update, and 
-creates a corresponding L<File::Tabular|File::Tabular> object. 
+should be opened for readonly or for update, and
+creates a corresponding L<File::Tabular|File::Tabular> object.
 The datafile may be cached in memory if directive C<useFileCache> is
 activated.
 
@@ -1965,17 +1969,17 @@ to detect changes and invalidate the cache.
 
   [% self.param %]
 
-With no argument, returns the list of parameter names 
-to the current HTTP request. 
+With no argument, returns the list of parameter names
+to the current HTTP request.
 
   [% self.param(param_name) %]
 
 With an argument, 
 returns the value that was specified under C<$param_name> in the
-HTTP request, or in the configuration file (see the 
+HTTP request, or in the configuration file (see the
 description of C<< [fixed]/[default] >> sections).
 The return value is always a scalar
-(so this is I<not exactly the same> as calling 
+(so this is I<not exactly the same> as calling
 C<< cgi.param(...) >>). If the HTTP request contains
 multiple values under the same name, these values
 are joined with a space. Initial
@@ -1992,13 +1996,13 @@ you can call
 
   [% self.can_do($action, [$record]) %]
 
-Tells whether the current user has permission to do 
+Tells whether the current user has permission to do
 C<$action> (which might be 'modif', 'delete', etc.).
 See explanations above about how permissions are specified
 in the initialization file.
 Sometimes permissions are setup in a record-specific way
-(for example one data field may contain the names of 
-authorized users); the second optional argument 
+(for example one data field may contain the names of
+authorized users); the second optional argument
 is meant for those cases, so that C<can_do()> can inspect the current
 data record.
 
@@ -2118,12 +2122,12 @@ Prints help. Not implemented yet.
   $self->user_match($access_control_list)
 
 Returns true if the current user (as stored
-in C<<  $self->{user} >> "matches" the access 
+in C<<  $self->{user} >> "matches" the access
 control list (given as an argument string).
 
 The meaning of "matches" may be redefined in subclasses;
-the default implementation just performs a regex 
-case-insensitive search within the list for a complete 
+the default implementation just performs a regex
+case-insensitive search within the list for a complete
 word equal to the username.
 
 Override in subclasses if you need other authorization
@@ -2142,11 +2146,11 @@ Returns the value in the first field of the record.
 
 =head1 AUTHOR
 
-Laurent Dami, C<< <laurent.d...@justice.ge.ch> >>
+Laurent Dami, C<< <dami AT cpan DOT org> >>
 
 =head1 COPYRIGHT & LICENSE
 
-Copyright 2007 Laurent Dami, all rights reserved.
+Copyright 2007-2016 Laurent Dami, all rights reserved.
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself.
@@ -2155,10 +2159,8 @@ under the same terms as Perl itself.
 
 =begin comment
 
-TODO 
+TODO
 
- - check completeness of logging code
- - simplify app_init for Template->new
  - how to remove an attached document
  - system to control headers
  - automatically set expire header if modify is enabled
@@ -2168,21 +2170,6 @@ TODO
  - more clever generation of wordsQueried in search
  - options qw/preMatch postMatch avoidMatchKey fieldSep recordSep/
     should be in a specific section
- - make compatibility with modperl1
  - dynamic menus presenting all possible values (like Excel automatic filter)
 
-
-TO CHECK WHEN UPGRADING
-
- - 'add' permission without 'modif' 
-  - remove calls to [% self.url('foobar') %]
-  - config : autoNum and not autonum
-
 =end comment
-
-
-
-
-
-
-

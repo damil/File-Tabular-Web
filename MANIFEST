@@ -5,7 +5,6 @@ lib/File/Tabular/Web.pm
 lib/File/Tabular/Web/Attachments.pm
 lib/File/Tabular/Web/Attachments/Indexed.pm
 MANIFEST
-META.yml			# Will be created by "make dist"
 README
 t/00-load.t
 t/f_t_web.t
@@ -19,3 +18,5 @@ t/htdocs/html/entities.txt
 t/htdocs/html/entities_main.tt
 t/htdocs/html/entities_src.txt
 t/pod.t
+META.yml
+META.json

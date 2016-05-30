@@ -1,5 +1,9 @@
 Revision history for File-Tabular-Web
 
+0.21 30.05.2016
+  - ported to Plack infrastructure
+  - revised documentation
+
 0.20
   - fix old documentation bug, detected by new Pod::Simple
 
