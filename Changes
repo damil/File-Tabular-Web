@@ -1,5 +1,8 @@
 Revision history for File-Tabular-Web
 
+0.22 31.05.2016
+  - fix missing dependencies in Build.PL
+
 0.21 30.05.2016
   - ported to Plack infrastructure
   - revised documentation

@@ -5,7 +5,6 @@ use strict;
 use warnings;
 no warnings 'uninitialized';
 
-use Carp;
 use Search::Indexer;
 use Search::QueryParser 0.92;
 use locale;

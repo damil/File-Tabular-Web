@@ -1,13 +1,11 @@
 package File::Tabular::Web; # documentation at bottom of file
 
-our $VERSION = "0.21";
+our $VERSION = "0.22";
 
 use strict;
 use warnings;
 no warnings 'uninitialized';
 use locale;
-use Carp;
-use CGI;
 use Template;
 use POSIX 'strftime';
 use List::Util      qw/min/;
@@ -15,8 +13,8 @@ use List::MoreUtils qw/uniq any all/;
 use AppConfig       qw/:argcount/;
 use File::Tabular 0.71;
 use Search::QueryParser;
-
 use Try::Tiny;
+
 use parent 'Plack::Component';
 use Plack::Request;
 use Plack::Response;
@@ -924,7 +922,7 @@ sub user_match {
 
 
 #----------------------------------------------------------------------
-sub key_field { 
+sub key_field {
 #----------------------------------------------------------------------
   my ($self) = @_;
   return ($self->{data}->headers)[0];
