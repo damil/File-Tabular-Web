@@ -16,6 +16,7 @@ use strict;
 use warnings;
 
 use File::Path;
+use File::Copy;
 use Scalar::Util qw/looks_like_number/;
 
 
@@ -66,11 +67,12 @@ sub before_update { #
   if ($self->{cfg}->get('fields_autoNum')) {
     $self->{next_autoNum} = $self->{data}{autoNum};
   }
-
+ 
   # now deal with file uploads
   foreach my $field (@upld) {
-    if (my $remote_name = $self->param($field)) {
-      $self->do_upload_file($record, $field, $remote_name);
+    my $u = $self->{req}->uploads;
+    if (my $upload_file = $u->get($field)) {
+      $self->do_upload_file($record, $field);
     }
     else { # upload is "" ==> must restore old name in record
       $record->{$field} = $self->{old_name}{$field} || "";
@@ -83,33 +85,18 @@ sub do_upload_file { #
 #----------------------------------------------------------------------
   my ($self, $record, $field) = @_;
 
-  my $remote_name = $self->param($field)
+  #my $remote_name = $self->param($field)
+  my $u = $self->{req}->uploads;
+  my $remote_name = $u->{$field}->path
     or return;  # do nothing if empty
 
-  my $src_fh;
-
-  if ($self->{modperl}) {
-    require Apache2::Request;
-    require Apache2::Upload;
-    my $req  = Apache2::Request->new($self->{modperl});
-    my $upld = $req->upload($field) or die "no upload object for field $field";
-    $src_fh = $upld->fh;
-  }
-  else {
-    my @upld_fh = $self->{cgi}->upload($field); # may be an array 
-
-    # TODO : some convention for deleting an existing attached file
-    # if @upload_fh == 0 && $remote_name =~ /^( |del)/ {...}
-
-    # no support at the moment for multiple files under same field
-    @upld_fh < 2  or die "several files uploaded to $field";
-    $src_fh = $upld_fh[0];
-  }
-
+  my $upload_file = $self->{req}->uploads->{$field};
+  
   # compute server name and server path
   $record->{$field} 
                 = $self->generate_upload_name($record, $field, $remote_name);
   my $path      = $self->upload_fullpath($record, $field);
+  
   my $old_path  = $self->{old_path}{$field};
 
   # avoid clobbering existing files
@@ -127,10 +114,9 @@ sub do_upload_file { #
   # do the transfer
   my ($dir) = ($path =~ m[^(.*)[/\\]]);
   -d $dir or mkpath $dir; # will die if can't make path
-  open my $dest_fh, ">$path.new" or die "open >$path.new : $!";
-  binmode($dest_fh), binmode($src_fh);
-  my $buf;
-  while (read($src_fh, $buf, 4096)) { print $dest_fh $buf;}
+
+  move($upload_file->{tempname}, "$path.new")
+    or die "Copy failed : $!";
 
   $self->{msg} .= "file $remote_name uploaded to $path<br>";
 }
@@ -228,8 +214,8 @@ sub upload_path {
 
   my $dir = looks_like_number($key) ? sprintf "%05d/", int($key / 100)
                                     : "";
-
-  return "${field}/${dir}${key}_$record->{$field}";
+  my $upload_path = "${field}/${dir}${key}_$record->{$field}";
+  return $upload_path;
 }
 
 
@@ -463,3 +449,4 @@ Copyright 2007 Laurent Dami, all rights reserved.
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself.
+
