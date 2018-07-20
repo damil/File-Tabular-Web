@@ -31,21 +31,26 @@ sub call { # Plack request dispatcher (see L<Plack::Component>)
 #----------------------------------------------------------------------
   my ($self, $env) = @_;
 
+  # $self is the persistent Plack component; we create another temporary
+  # instance called 'handler' to handle the current request
+  my $class = ref $self;
+  my $handler = $class->new;
+
   try {
     # regular response
-    $self->_new($env);
-    $self->_dispatch_request;
+    $handler->_new($env);
+    $handler->_dispatch_request;
   }
     # in case of an exception
     catch {
       # try displaying through msg view..
-      $self->{msg} = "<b><font color='red'>ERROR</font></b> : $_";
-      $self->{view} = 'msg';
-      try {$self->display}
+      $handler->{msg} = "<b><font color='red'>ERROR</font></b> : $_";
+      $handler->{view} = 'msg';
+      try {$handler->display}
         catch { 
           # .. or else fallback with simple HTML page
           my $res = Plack::Response->new(500);
-          $res->body("<html>$self->{msg}</html>");
+          $res->body("<html>$handler->{msg}</html>");
           $res->content_type('text/html');
           return $res->finalize;
         };
