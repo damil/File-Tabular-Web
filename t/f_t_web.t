@@ -6,7 +6,7 @@ use File::Copy;
 use HTTP::Request::Common;
 use Plack::Test;
 use File::Tabular::Web;
-use Test::More tests => 11;
+use Test::More tests => 12;
 
 my $base_app = File::Tabular::Web->new->to_app;
 my $url = "html/entities.ftw";
@@ -31,6 +31,10 @@ test_psgi
 
     $res = $cb->(GET $url . "?S=grave");
     like $res->content, qr[<b>10</b> results found],     'search grave';
+
+
+    # results should not be persistent through several requests
+    unlike $res->content, qr[Next|Previous],             'no page links';
 
     $res = $cb->(GET $url . "?L=221"); 
     like $res->content, qr[Entity named <b>Yacute</b>],  'long';
