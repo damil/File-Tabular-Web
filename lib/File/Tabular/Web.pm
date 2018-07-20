@@ -293,7 +293,6 @@ sub _new { # expands and re-blesses the File::Tabular::Web instance
   $self->{user}   = $req->user || "Anonymous";
   $self->{url}    = $req->base . $path_info;
   $self->{method} = $req->method;
-  $self->{msg}    = "";
 
   # are we running under mod_perl ? if so, have a handle to the Rec object.
   my $mod_perl = do {my $input = $self->{req}->env->{'psgi.input'};
