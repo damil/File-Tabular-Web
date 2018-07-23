@@ -6,9 +6,9 @@ use File::Copy;
 use HTTP::Request::Common;
 use Plack::Test;
 use File::Tabular::Web;
-use Test::More tests => 12;
+use Test::More tests => 13;
 
-my $base_app = File::Tabular::Web->new->to_app;
+my $base_app = File::Tabular::Web->new(disclaimer => "This is free software")->to_app;
 my $url = "html/entities.ftw";
 
 test_psgi
@@ -41,6 +41,9 @@ test_psgi
 
     $res = $cb->(GET $url . "?M=221"); 
     like $res->content, qr[<input name="Name" value="Yacute">], 'modify';
+
+    # parameters to the initial new() should be copied to per-request instances
+    like $res->content, qr[This is free software], 'new() params';
 
     SKIP : {
       # get a fresh copy of the data file

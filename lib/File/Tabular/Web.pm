@@ -34,7 +34,7 @@ sub call { # Plack request dispatcher (see L<Plack::Component>)
   # $self is the persistent Plack component; we create another temporary
   # instance called 'handler' to handle the current request
   my $class = ref $self;
-  my $handler = $class->new;
+  my $handler = $class->new(%$self);
 
   try {
     # regular response
