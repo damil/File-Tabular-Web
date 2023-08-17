@@ -1,7 +1,8 @@
 package File::Tabular::Web; # documentation at bottom of file
 
-our $VERSION = "0.26";
+our $VERSION = "0.27";
 
+use utf8;
 use strict;
 use warnings;
 no warnings 'uninitialized';
@@ -10,6 +11,7 @@ use Template;
 use POSIX 'strftime';
 use List::Util      qw/min/;
 use List::MoreUtils qw/uniq any all/;
+use Encode          qw/encode decode/;
 use AppConfig       qw/:argcount/;
 use File::Tabular 0.71;
 use Search::QueryParser;
@@ -154,6 +156,15 @@ sub _app_read_config { # read configuration file through Appconfig
   $cfg->file($config_file); # or croak "AppConfig: open $config_file: $^E";
   # BUG : AppConfig does not return any error code if ->file(..) fails !!
 
+  # the 'application_all_utf8' option activates various sub_options
+  if ($cfg->get('application_all_utf8')) {
+    my @implied_options = qw(template_encoding
+                             application_data_encoding
+                             application_params_encoding
+                             application_response_encoding);
+    $cfg->get($_) or $cfg->set($_, 'utf-8') foreach @implied_options;
+  }
+
   return $cfg;
 }
 
@@ -181,11 +192,13 @@ sub app_initialize {
                             );
 
   # initialize template toolkit object
-  $app->{tmpl} = Template->new({
+  my %tt_config = (
     INCLUDE_PATH => \@tmpl_dirs,
     FILTERS      => $self->app_tmpl_filters,
     EVAL_PERL    => 1,
-   })
+    ENCODING     => $app->{cfg}->get("template_encoding"),
+   );
+  $app->{tmpl} = Template->new(\%tt_config)
     or die Template->error;
 
    # special fields : time of last modif, author of last modif
@@ -406,20 +419,24 @@ sub open_data { # open File::Tabular object on data file
   }
 
   my $open_mode = ($self->{op} =~ /delete|update/) ? "+<" : "<";
+  if (my $encoding = $self->{cfg}->get('application_data_encoding')) {
+    $open_mode .= ":encoding($encoding)";
+  }
 
   # application option : use in-memory cache only for read operations
   if ($self->{cfg}->get('application_useFileCache') 
-        && $open_mode eq '<') { 
+        && $open_mode =~ /^</) { 
     my $cache_entry = $datafile_cache{$open_src};
     unless ($cache_entry && $cache_entry->{mtime} == $mtime) {
-      open my $fh, $open_src or die "open $open_src : $^E";
+      open my $fh, $open_mode, $open_src or die "open $open_mode $open_src : $^E";
       local $/ = undef;
       my $content = <$fh>;	# slurps the whole file into memory
       close $fh;
       $datafile_cache{$open_src} = {mtime   => $mtime, 
                                     content => \$content };
     }
-    $open_src = $cache_entry->{content}; # ref to in-memory content
+    $open_src  = $cache_entry->{content}; # ref to in-memory content
+    $open_mode =~ s/:encoding.*//;        # encoding layer must not be applied to the in-memory string
   }
 
   # set up options for creating File::Tabular object
@@ -431,7 +448,7 @@ sub open_data { # open File::Tabular object on data file
   my $jFile = $self->{cfg}->get('journal');
   $options{journal} = "$self->{app}{dir}$jFile" if $jFile;
 
-  # create File::Tabular object
+  # create File::Tabular object, either on the real file, or on the in-memory cache
   $self->{data} = new File::Tabular($open_mode, $open_src, \%options);
 }
 
@@ -462,6 +479,9 @@ sub param { # Encapsulates access to the lower layer param() method, and
   # then check in parameters to this request (flattened into a scalar)
   my @vals = $params->get_all($param_name);
   if (@vals) {
+    if (my $encoding = $self->{cfg}->get('application_params_encoding')) {
+      $_ = decode($encoding, $_) foreach @vals;
+    }
     $val = join(' ', @vals);    # join multiple values
     $val =~ s/^\s+//;           # remove initial spaces
     $val =~ s/\s+$//;           # remove final spaces
@@ -552,8 +572,13 @@ sub display { # display results in the requested view
     or die $self->{app}{tmpl}->error();
 
   # generate Plack response
+  my $content_type = "text/html";
+  if (my $charset = $self->{cfg}->get("application_response_encoding")) {
+    $content_type .= "; charset=$charset";
+    $body          = encode($charset, $body);
+  }
   my $res = Plack::Response->new(200);
-  $res->headers({"Content-type"   => "text/html",
+  $res->headers({"Content-type"   => $content_type,
                  "Content-length" => length($body),
                  "Last-modified"  => $self->{data}->stat->{mtime},
                  "Expires"        => 0});
@@ -702,6 +727,9 @@ sub _url_for_next_slice {
   my ($self, $start) = @_;
 
   my $url = "?" . join "&", $self->params_for_next_slice($start);
+  if (my $encoding = $self->{cfg}->get("application_params_encoding")) {
+    $url = encode($encoding, $url);
+  }
 
   # uri encoding
   $url =~ s/([^;\/?:@&=\$,A-Z0-9\-_.!~*'() ])/sprintf("%%%02X", ord($1))/ige;
@@ -1555,6 +1583,38 @@ Name of the tabular file containing the data.  This must be a
 single-level name and must reside in the application directory.
 By default: application name with the C<.txt> suffix appended.
 
+=item C<< all_utf8=1 >>
+
+A shortcut for simultaneously setting C<data_encoding>, C<params_encoding>, C<response_encoding>
+and C<< [template] encoding >> to 'utf-8'.
+
+
+=item C<< data_encoding=some_encoding >>
+
+An encoding layer to be applied through L<PerlIO::encoding> when opening the data file.
+
+=item C<< params_encoding=some_encoding >>
+
+A character encoding to be applied :
+
+=over
+
+=item *
+
+for decoding parameters to HTTP requests, after they have been URL-decoded
+
+=item *
+
+for encoding parameters before URL-encoding, when generating URIs
+(for example in L<_url_for_next_slice>).
+
+=back
+
+=item C<< response_encoding >>
+
+Encoding for HTTP responses. This will set the HTTP charset and encode the response body accordingly.
+
+
 =item C<< class=My::File::Tabular::Web::Subclass >>
 
 Will dynamically load the specified module and use it as
@@ -1676,7 +1736,11 @@ of attached documents).
 
 =head2 [template]
 
-This section specifies where to find templates for various views.
+This section specifies parameters to be used by the L<Template Toolkit|Template>.
+
+The first parameter C<encoding> is passed verbatim to the C<ENCODING> option of L<Template/new>.
+
+Other entries in this section specify where to find templates for various views.
 The specified locations will be looked for in several directories:
 the application template directory (as specified by C<dir> directive,
 see below), 
@@ -1685,7 +1749,13 @@ the default C<File::Tabular::Web> template directory
 (as specified by the C<app_tmpl_default_dir> method),
 or the subdirectory C<default> of the above.
 
+
 =over
+
+=item encoding
+
+passed to the C<ENCODING> option of L<Template/new> (specifies in which charste the template files are encoded)
+
 
 =item dir
 

@@ -11,9 +11,10 @@
 
 
 package File::Tabular::Web::Attachments;
-use base 'File::Tabular::Web';
+use utf8;
 use strict;
 use warnings;
+use base 'File::Tabular::Web';
 
 use File::Path;
 use Scalar::Util qw/looks_like_number/;

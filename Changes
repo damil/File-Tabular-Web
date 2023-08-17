@@ -1,5 +1,8 @@
 Revision history for File-Tabular-Web
 
+0.27 17.08.2023
+  - Unicode support (templates, data file, uri parameters)
+
 0.26 20.07.2018
   - fix conceptual bug when running in Plack mode : the persistent
     Plack component should not be confused with the temporary object
